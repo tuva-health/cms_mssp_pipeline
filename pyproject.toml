@@ -1,0 +1,79 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mssp-pipeline"
+version = "0.1.0"
+description = "Download and process MSSP ACO Datahub files — end-to-end pipeline"
+requires-python = ">=3.11"
+# Core install includes only the download subsystem dependencies.
+# Add optional groups for the processing backends you need.
+dependencies = [
+    "boto3>=1.34",
+    "python-dotenv>=1.0",
+]
+
+[project.scripts]
+mssp-download = "mssp_pipeline.__main__:download_main"
+mssp-process  = "mssp_pipeline.__main__:process_main"
+mssp-pipeline = "mssp_pipeline.__main__:pipeline_main"
+
+[project.optional-dependencies]
+# Core DuckDB processing engine (required for mssp-process / mssp-pipeline)
+processing = [
+    "duckdb",
+    "openpyxl",
+]
+# Cloud output backends — install only what you need
+snowflake = [
+    "snowflake-connector-python",
+    "cryptography",
+    "keyring",
+]
+databricks = [
+    "databricks-sql-connector",
+    "databricks-sdk",
+]
+bigquery = [
+    "google-cloud-bigquery",
+    "google-cloud-storage",
+]
+redshift = [
+    "boto3>=1.34",
+    "redshift-connector",
+]
+azure = [
+    "azure-storage-blob",
+]
+fabric = [
+    "deltalake",
+    "azure-storage-blob",
+]
+# Install everything
+all = [
+    "duckdb",
+    "openpyxl",
+    "snowflake-connector-python",
+    "cryptography",
+    "keyring",
+    "databricks-sql-connector",
+    "databricks-sdk",
+    "google-cloud-bigquery",
+    "google-cloud-storage",
+    "boto3>=1.34",
+    "redshift-connector",
+    "azure-storage-blob",
+    "deltalake",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "duckdb",
+    "openpyxl",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["mssp_pipeline"]
+artifacts = ["bin/acoms-cli"]

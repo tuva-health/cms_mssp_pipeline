@@ -1,0 +1,29 @@
+# Credentials and state — never commit
+config.txt
+state.json
+
+# Downloaded/extracted source files
+downloads/
+
+# Processing staging directory
+STAGED/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+
+# uv
+.uv/
+
+# Environment
+.env
+.envrc.local
+
+# Editor
+.DS_Store
+.idea/
+.vscode/
