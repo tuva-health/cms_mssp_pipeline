@@ -61,8 +61,19 @@ CLI_PATH: Path = Path(__file__).parent.parent / "bin" / "acoms-cli"
 STATE_FILE: Path = Path("state.json")
 
 # Set to an S3 bucket name to upload extracted files there and delete local copies.
-# Leave empty/None to keep files local.
-S3_BUCKET: str | None = None
+# Defaults to the bucket inferred from FILE_STORE when it is an s3:// URL.
+# Override with MSSP_S3_BUCKET to use a different bucket for downloads vs. the file store.
+def _s3_bucket_from_file_store(file_store: str) -> str | None:
+    if file_store.startswith("s3://"):
+        bucket = file_store[5:].split("/")[0]
+        return bucket or None
+    return None
+
+S3_BUCKET: str | None = (
+    os.environ.get("MSSP_S3_BUCKET")
+    or _s3_bucket_from_file_store(FILE_STORE)
+    or None
+)
 
 # ---------------------------------------------------------------------------
 # Processing (ETL) settings

@@ -88,7 +88,7 @@ def run(
                 k: getattr(_proc_cfg, k) for k in dir(_proc_cfg) if not k.startswith("_")
             })
             processing_config.ACO_ID = aco
-            processing_config.FILE_STORE = str(download_dir)
+            processing_config.FILE_STORE = f"s3://{s3_bucket}" if s3_bucket else str(download_dir)
 
         print(f"[process] ACO: {aco} | FILE_STORE: {processing_config.FILE_STORE} | OUTPUT_TYPE: {processing_config.OUTPUT_TYPE}")
         process_run(processing_config)

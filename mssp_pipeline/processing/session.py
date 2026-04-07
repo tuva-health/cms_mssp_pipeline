@@ -62,6 +62,17 @@ class DuckDBSession:
         self.connection.execute("INSTALL httpfs FROM core; LOAD httpfs;")
         # aws extension loads credentials from env vars, ~/.aws/credentials, or IAM role.
         self.connection.execute("INSTALL aws FROM core; LOAD aws;")
+
+        # CCLF bundles can be several hundred MB.  The default 30-second HTTP
+        # timeout is too short for large files on a slow or congested connection.
+        # Five minutes covers even the largest yearly bundles, and three retries
+        # with exponential back-off handle transient S3 hiccups without failing
+        # the whole run.
+        self.connection.execute("SET http_timeout = 300000;")       # 5 minutes (ms)
+        self.connection.execute("SET http_retries = 3;")            # retry up to 3×
+        self.connection.execute("SET http_retry_wait_ms = 500;")    # start at 500 ms
+        self.connection.execute("SET http_retry_backoff = 4;")      # 500 → 2000 → 8000 ms
+
         profile = getattr(self._config, "AWS_PROFILE", "")
         if profile:
             self.connection.execute(f"CALL load_aws_credentials('{profile}');")

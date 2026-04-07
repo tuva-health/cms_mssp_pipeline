@@ -62,9 +62,12 @@ def download_main() -> None:
         print("--aco and --start-year are required when running in download mode.")
         raise SystemExit(1)
 
+    from mssp_pipeline import config as root_cfg
     from mssp_pipeline.integration.config import Config
     from mssp_pipeline.integration.downloader import Downloader
     from mssp_pipeline.integration.state import StateManager
+
+    s3_bucket = args.s3_bucket or root_cfg.S3_BUCKET
 
     config = Config(
         aco=args.aco,
@@ -72,10 +75,10 @@ def download_main() -> None:
         output_dir=Path(args.output_dir),
         state_file=Path(args.state_file),
         cli_path=cli_path,
-        s3_bucket=args.s3_bucket,
+        s3_bucket=s3_bucket,
     )
 
-    state = StateManager(config.state_file, s3_bucket=args.s3_bucket)
+    state = StateManager(config.state_file, s3_bucket=s3_bucket)
 
     if args.reset_state:
         print("Resetting state — all files will be re-downloaded.")
@@ -169,6 +172,7 @@ def pipeline_main() -> None:
         if args.full_refresh:
             processing_config.FULL_REFRESH = True
 
+    from mssp_pipeline import config as root_cfg
     from mssp_pipeline.pipeline import run as pipeline_run
     pipeline_run(
         aco=args.aco,
@@ -177,7 +181,7 @@ def pipeline_main() -> None:
         download_mode=args.mode,
         cli_path=cli_path,
         state_file=Path(args.state_file),
-        s3_bucket=args.s3_bucket,
+        s3_bucket=args.s3_bucket or root_cfg.S3_BUCKET,
         reset_state=args.reset_state,
         skip_download=args.skip_download,
         skip_process=args.skip_process,
