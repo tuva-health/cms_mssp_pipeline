@@ -1,9 +1,14 @@
+from .base import normalize_identifier, normalize_query
+
+
 class DuckDBExporter:
     def __init__(self, schema: str = "raw_data", full_refresh: bool = False):
         self.schema = schema
         self.full_refresh = full_refresh
 
     def export(self, query: str, table_name: str, duckdb_connection) -> None:
+        table_name = normalize_identifier(table_name)
+        query = normalize_query(query, duckdb_connection)
         destination = f"{self.schema}.{table_name}"
         duckdb_connection.execute(f"CREATE SCHEMA IF NOT EXISTS {self.schema}")
 
@@ -26,6 +31,7 @@ class DuckDBExporter:
 
     def get_existing_file_paths(self, table_name: str, duckdb_connection) -> list:
         """Return distinct FILE_PATH values from the destination table, or [] if it doesn't exist."""
+        table_name = normalize_identifier(table_name)
         table_exists = duckdb_connection.execute(f"""
             SELECT COUNT(*) FROM information_schema.tables
             WHERE table_schema = '{self.schema}'

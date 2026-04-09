@@ -6,11 +6,14 @@ build-backend = "hatchling.build"
 name = "mssp-pipeline"
 version = "0.1.0"
 description = "Download and process MSSP ACO Datahub files — end-to-end pipeline"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 # Core install includes only the download subsystem dependencies.
 # Add optional groups for the processing backends you need.
 dependencies = [
     "boto3>=1.34",
+    "azure-identity",
+    "azure-storage-blob",
+    "google-cloud-storage",
     "python-dotenv>=1.0",
 ]
 
@@ -44,10 +47,12 @@ redshift = [
     "redshift-connector",
 ]
 azure = [
+    "azure-identity",
     "azure-storage-blob",
 ]
 fabric = [
     "deltalake",
+    "azure-identity",
     "azure-storage-blob",
 ]
 # Install everything
@@ -63,6 +68,7 @@ all = [
     "google-cloud-storage",
     "boto3>=1.34",
     "redshift-connector",
+    "azure-identity",
     "azure-storage-blob",
     "deltalake",
 ]
@@ -72,6 +78,9 @@ dev = [
     "pytest>=9.0.2",
     "duckdb",
     "openpyxl",
+    "azure-identity",
+    "azure-storage-blob",
+    "google-cloud-storage",
 ]
 
 [tool.hatch.build.targets.wheel]

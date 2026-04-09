@@ -2,6 +2,8 @@ import os
 import boto3
 import redshift_connector
 
+from .base import normalize_identifier, normalize_query
+
 
 class RedshiftExporter:
     """
@@ -33,6 +35,8 @@ class RedshiftExporter:
         self.full_refresh = full_refresh
 
     def export(self, query: str, table_name: str, duckdb_connection) -> None:
+        table_name = normalize_identifier(table_name)
+        query = normalize_query(query, duckdb_connection)
         local_parquet = os.path.join(self.staging_dir, f"{table_name}.parquet")
         s3_uri = f"{self.rs_config.staging_bucket.rstrip('/')}/{table_name}.parquet"
 
@@ -56,6 +60,7 @@ class RedshiftExporter:
 
     def get_existing_file_paths(self, table_name: str, duckdb_connection) -> list:
         """Return distinct FILE_PATH values from the existing Redshift table, or [] if not found."""
+        table_name = normalize_identifier(table_name)
         conn = self._connect()
         cursor = conn.cursor()
         try:
@@ -121,7 +126,7 @@ class RedshiftExporter:
         cols = duckdb_connection.execute(
             f"DESCRIBE SELECT * FROM ({query}) AS q"
         ).fetchall()
-        col_defs = ", ".join([f'"{c[0]}" VARCHAR' for c in cols])
+        col_defs = ", ".join([f"{c[0]} VARCHAR" for c in cols])
         table_ref = self._table_ref(table_name)
         conn = self._connect()
         cursor = conn.cursor()

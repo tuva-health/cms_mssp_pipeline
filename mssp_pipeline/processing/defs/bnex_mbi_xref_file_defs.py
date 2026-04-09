@@ -22,12 +22,12 @@ BNEX_MBI_XREF_FILE_DEFS: List[BNEXMBIXrefFileDef] = [
         filename_pattern="MBI",
         has_header=False,
         columns=[
-            ColumnDef("PERFORMANCE_YEAR", 4),
-            ColumnDef("REPORT_MONTH", 2),
-            ColumnDef("CURRENT_BENE_MBI", 11),
-            ColumnDef("PREVIOUS_BENE_MBI", 11),
-            ColumnDef("PREVIOUS_IDENTIFIER_EFFECTIVE_DATE", 8),
-            ColumnDef("PREVIOUS_IDENTIFIER_OBSOLETE_DATE", 8),
+            ColumnDef("performance_year", 4),
+            ColumnDef("report_month", 2),
+            ColumnDef("current_bene_mbi", 11),
+            ColumnDef("previous_bene_mbi", 11),
+            ColumnDef("previous_identifier_effective_date", 8),
+            ColumnDef("previous_identifier_obsolete_date", 8),
         ],
     ),
     

@@ -15,7 +15,7 @@ def run(
     download_mode: str = "incremental",
     cli_path: Path | None = None,
     state_file: Path | None = None,
-    s3_bucket: str | None = None,
+    remote_store: str | None = None,
     reset_state: bool = False,
     skip_download: bool = False,
     skip_process: bool = False,
@@ -34,8 +34,9 @@ def run(
         cli_path:          Path to the acoms-cli binary. Defaults to bin/acoms-cli
                            in the package root.
         state_file:        Path to the download state JSON. Defaults to state.json.
-        s3_bucket:         S3 bucket name. When set, extracted files are uploaded
-                           there and local copies deleted; state is also stored in S3.
+        remote_store:      Remote object store URI. When set, extracted files are
+                           uploaded there and local copies deleted; state is also
+                           stored in the same remote store.
         reset_state:       Wipe the download state before running (force re-download).
         skip_download:     Skip the download step (process already-present files).
         skip_process:      Skip the processing step (download only).
@@ -55,6 +56,7 @@ def run(
         from mssp_pipeline.integration.config import Config
         from mssp_pipeline.integration.downloader import Downloader
         from mssp_pipeline.integration.state import StateManager
+        from mssp_pipeline import config as root_cfg
 
         cfg = Config(
             aco=aco,
@@ -62,10 +64,21 @@ def run(
             output_dir=Path(download_dir),
             state_file=state_file,
             cli_path=Path(cli_path).resolve(),
-            s3_bucket=s3_bucket,
+            remote_store=remote_store,
+            azure_storage_connection_string=root_cfg.AZURE_STORAGE_CONNECTION_STRING,
+            azure_storage_account=root_cfg.AZURE_STORAGE_ACCOUNT,
+            gcs_credentials_path=root_cfg.GCS_CREDENTIALS_PATH,
+            gcs_project_id=root_cfg.GCS_PROJECT_ID,
         )
 
-        state = StateManager(cfg.state_file, s3_bucket=s3_bucket)
+        state = StateManager(
+            cfg.state_file,
+            remote_store=remote_store,
+            azure_storage_connection_string=root_cfg.AZURE_STORAGE_CONNECTION_STRING,
+            azure_storage_account=root_cfg.AZURE_STORAGE_ACCOUNT,
+            gcs_credentials_path=root_cfg.GCS_CREDENTIALS_PATH,
+            gcs_project_id=root_cfg.GCS_PROJECT_ID,
+        )
 
         if reset_state:
             print("Resetting download state — all files will be re-downloaded.")
@@ -87,8 +100,8 @@ def run(
             processing_config = SimpleNamespace(**{
                 k: getattr(_proc_cfg, k) for k in dir(_proc_cfg) if not k.startswith("_")
             })
-            processing_config.ACO_ID = aco
-            processing_config.FILE_STORE = f"s3://{s3_bucket}" if s3_bucket else str(download_dir)
+        processing_config.ACO_ID = aco
+        processing_config.FILE_STORE = remote_store or str(download_dir)
 
         print(f"[process] ACO: {aco} | FILE_STORE: {processing_config.FILE_STORE} | OUTPUT_TYPE: {processing_config.OUTPUT_TYPE}")
         process_run(processing_config)

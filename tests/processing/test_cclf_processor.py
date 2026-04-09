@@ -92,7 +92,7 @@ def test_cclf_all_columns_varchar(test_session, test_config, raw_dir):
     col_types = test_session.connection.execute(
         "SELECT column_name, data_type FROM information_schema.columns "
         "WHERE table_schema = 'raw_data' AND table_name = 'parta_claims_header' "
-        "AND column_name NOT IN ('FILE_DATE')"
+        "AND column_name NOT IN ('file_date')"
     ).fetchall()
 
     assert len(col_types) > 0, (

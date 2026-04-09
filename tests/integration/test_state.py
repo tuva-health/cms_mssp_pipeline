@@ -107,6 +107,7 @@ def test_mark_and_check_uploaded(state):
 def test_mark_uploaded_stores_s3_prefix(state):
     state.mark_uploaded("C1234", 2025, 113, "file.zip", "2025-01-01T00:00:00.000Z", "C1234/2025/113")
     record = state._data["downloaded"]["C1234"]["2025"]["113"]["file.zip"]
+    assert record["remote_prefix"] == "C1234/2025/113"
     assert record["s3_prefix"] == "C1234/2025/113"
     assert "uploaded_at" in record
     assert "downloaded_at" in record
@@ -118,19 +119,15 @@ def test_is_uploaded_wrong_last_updated_returns_false(state):
 
 
 # ---------------------------------------------------------------------------
-# S3-backed state load / save
+# Remote-backed state load / save
 # ---------------------------------------------------------------------------
 
 def test_s3_load_on_first_run_returns_empty_state(tmp_path):
-    from botocore.exceptions import ClientError
+    remote_client = MagicMock()
+    remote_client.read_text.side_effect = FileNotFoundError("missing")
 
-    mock_client = MagicMock()
-    mock_client.get_object.side_effect = ClientError(
-        {"Error": {"Code": "NoSuchKey", "Message": "Not found"}}, "GetObject"
-    )
-
-    with patch("boto3.client", return_value=mock_client):
-        state = StateManager(tmp_path / "state.json", s3_bucket="my-bucket")
+    with patch("mssp_pipeline.integration.state.build_remote_store_client", return_value=remote_client):
+        state = StateManager(tmp_path / "state.json", remote_store="s3://my-bucket")
 
     assert state.last_run is None
     assert state._data == {"last_run": None, "downloaded": {}}
@@ -143,50 +140,116 @@ def test_s3_load_reads_existing_state(tmp_path):
             "C1234": {"2025": {"113": {"file.zip": {"last_updated": "2025-01-01", "downloaded_at": "2026-01-01", "uploaded_at": "2026-01-01", "s3_prefix": "C1234/2025/113"}}}}
         },
     }
-    mock_client = MagicMock()
-    mock_client.get_object.return_value = {"Body": MagicMock(read=lambda: json.dumps(existing).encode())}
+    remote_client = MagicMock()
+    remote_client.read_text.return_value = json.dumps(existing)
 
-    with patch("boto3.client", return_value=mock_client):
-        state = StateManager(tmp_path / "state.json", s3_bucket="my-bucket")
+    with patch("mssp_pipeline.integration.state.build_remote_store_client", return_value=remote_client):
+        state = StateManager(tmp_path / "state.json", remote_store="s3://my-bucket")
 
     assert state.last_run == "2026-01-01T00:00:00Z"
     assert state.is_uploaded("C1234", 2025, 113, "file.zip", "2025-01-01")
+    record = state._data["downloaded"]["C1234"]["2025"]["113"]["file.zip"]
+    assert record["remote_prefix"] == "C1234/2025/113"
 
 
 def test_s3_save_calls_put_object(tmp_path):
-    from botocore.exceptions import ClientError
+    remote_client = MagicMock()
+    remote_client.read_text.side_effect = FileNotFoundError("missing")
 
-    mock_client = MagicMock()
-    mock_client.get_object.side_effect = ClientError(
-        {"Error": {"Code": "NoSuchKey", "Message": "Not found"}}, "GetObject"
-    )
-
-    with patch("boto3.client", return_value=mock_client):
-        state = StateManager(tmp_path / "state.json", s3_bucket="my-bucket", s3_state_key="run/state.json")
+    with patch("mssp_pipeline.integration.state.build_remote_store_client", return_value=remote_client):
+        state = StateManager(tmp_path / "state.json", remote_store="s3://my-bucket/run")
         state.mark_uploaded("C1234", 2025, 113, "file.zip", "2025-01-01", "C1234/2025/113")
         state.save()
 
-    mock_client.put_object.assert_called_once()
-    call_kwargs = mock_client.put_object.call_args[1]
-    assert call_kwargs["Bucket"] == "my-bucket"
-    assert call_kwargs["Key"] == "run/state.json"
-    assert call_kwargs["ContentType"] == "application/json"
-    saved = json.loads(call_kwargs["Body"].decode())
-    assert saved["downloaded"]["C1234"]["2025"]["113"]["file.zip"]["s3_prefix"] == "C1234/2025/113"
+    remote_client.write_text.assert_called_once()
+    location = remote_client.write_text.call_args.args[0]
+    assert location.bucket == "my-bucket"
+    assert location.prefix == "run/state.json"
+    assert remote_client.write_text.call_args.kwargs["content_type"] == "application/json"
+    saved = json.loads(remote_client.write_text.call_args.args[1])
+    assert saved["downloaded"]["C1234"]["2025"]["113"]["file.zip"]["remote_prefix"] == "C1234/2025/113"
 
 
 def test_s3_save_does_not_write_local_file(tmp_path):
-    from botocore.exceptions import ClientError
-
-    mock_client = MagicMock()
-    mock_client.get_object.side_effect = ClientError(
-        {"Error": {"Code": "NoSuchKey", "Message": "Not found"}}, "GetObject"
-    )
-
     state_file = tmp_path / "state.json"
+    remote_client = MagicMock()
+    remote_client.read_text.side_effect = FileNotFoundError("missing")
 
-    with patch("boto3.client", return_value=mock_client):
-        state = StateManager(state_file, s3_bucket="my-bucket")
+    with patch("mssp_pipeline.integration.state.build_remote_store_client", return_value=remote_client):
+        state = StateManager(state_file, remote_store="s3://my-bucket")
         state.save()
 
     assert not state_file.exists()
+
+
+def test_azure_load_on_first_run_returns_empty_state(tmp_path):
+    remote_client = MagicMock()
+    remote_client.read_text.side_effect = FileNotFoundError("missing")
+
+    with patch("mssp_pipeline.integration.state.build_remote_store_client", return_value=remote_client):
+        state = StateManager(
+            tmp_path / "state.json",
+            remote_store="az://container/base",
+            azure_storage_connection_string="UseDevelopmentStorage=true",
+        )
+
+    assert state._data == {"last_run": None, "downloaded": {}}
+
+
+def test_azure_save_writes_blob(tmp_path):
+    remote_client = MagicMock()
+    remote_client.read_text.side_effect = FileNotFoundError("missing")
+
+    with patch("mssp_pipeline.integration.state.build_remote_store_client", return_value=remote_client):
+        state = StateManager(
+            tmp_path / "state.json",
+            remote_store="az://container/base",
+            azure_storage_connection_string="UseDevelopmentStorage=true",
+        )
+        state.mark_uploaded("C1234", 2025, 113, "file.zip", "2025-01-01", "C1234/2025/113")
+        state.save()
+
+    location = remote_client.write_text.call_args.args[0]
+    assert location.bucket == "container"
+    assert location.prefix == "base/state.json"
+
+
+def test_gcs_load_reads_existing_state(tmp_path):
+    remote_client = MagicMock()
+    remote_client.read_text.return_value = json.dumps(
+        {
+            "last_run": "2026-01-01T00:00:00Z",
+            "downloaded": {
+                "C1234": {"2025": {"113": {"file.zip": {"last_updated": "2025-01-01", "downloaded_at": "2026-01-01", "uploaded_at": "2026-01-01", "remote_prefix": "C1234/2025/113"}}}}
+            },
+        }
+    )
+
+    with patch("mssp_pipeline.integration.state.build_remote_store_client", return_value=remote_client):
+        state = StateManager(
+            tmp_path / "state.json",
+            remote_store="gs://bucket/base",
+            gcs_credentials_path="/tmp/creds.json",
+            gcs_project_id="project-1",
+        )
+
+    assert state.is_uploaded("C1234", 2025, 113, "file.zip", "2025-01-01")
+
+
+def test_gcs_save_writes_blob(tmp_path):
+    remote_client = MagicMock()
+    remote_client.read_text.side_effect = FileNotFoundError("missing")
+
+    with patch("mssp_pipeline.integration.state.build_remote_store_client", return_value=remote_client):
+        state = StateManager(
+            tmp_path / "state.json",
+            remote_store="gs://bucket/base",
+            gcs_credentials_path="/tmp/creds.json",
+            gcs_project_id="project-1",
+        )
+        state.mark_uploaded("C1234", 2025, 113, "file.zip", "2025-01-01", "C1234/2025/113")
+        state.save()
+
+    location = remote_client.write_text.call_args.args[0]
+    assert location.bucket == "bucket"
+    assert location.prefix == "base/state.json"

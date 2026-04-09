@@ -34,6 +34,7 @@ def _add_download_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--output-dir", default="downloads", help="Root directory for extracted files")
     parser.add_argument("--state-file", default="state.json", help="Path to state tracking file")
     parser.add_argument("--cli-path", default=None, help="Path to acoms-cli binary (default: bin/acoms-cli)")
+    parser.add_argument("--file-store", help="Remote file store override — s3://, az:// / abfss://, or gs://")
     parser.add_argument("--s3-bucket", help="S3 bucket for storing files and state")
     parser.add_argument("--configure", action="store_true", help="Run interactive acoms-cli configuration and exit")
     parser.add_argument("--reset-state", action="store_true", help="Wipe state before running")
@@ -67,7 +68,11 @@ def download_main() -> None:
     from mssp_pipeline.integration.downloader import Downloader
     from mssp_pipeline.integration.state import StateManager
 
-    s3_bucket = args.s3_bucket or root_cfg.S3_BUCKET
+    remote_store = args.file_store or root_cfg.REMOTE_FILE_STORE
+    if args.s3_bucket:
+        remote_store = f"s3://{args.s3_bucket}"
+    elif not remote_store and root_cfg.S3_BUCKET:
+        remote_store = f"s3://{root_cfg.S3_BUCKET}"
 
     config = Config(
         aco=args.aco,
@@ -75,10 +80,21 @@ def download_main() -> None:
         output_dir=Path(args.output_dir),
         state_file=Path(args.state_file),
         cli_path=cli_path,
-        s3_bucket=s3_bucket,
+        remote_store=remote_store,
+        azure_storage_connection_string=root_cfg.AZURE_STORAGE_CONNECTION_STRING,
+        azure_storage_account=root_cfg.AZURE_STORAGE_ACCOUNT,
+        gcs_credentials_path=root_cfg.GCS_CREDENTIALS_PATH,
+        gcs_project_id=root_cfg.GCS_PROJECT_ID,
     )
 
-    state = StateManager(config.state_file, s3_bucket=s3_bucket)
+    state = StateManager(
+        config.state_file,
+        remote_store=remote_store,
+        azure_storage_connection_string=root_cfg.AZURE_STORAGE_CONNECTION_STRING,
+        azure_storage_account=root_cfg.AZURE_STORAGE_ACCOUNT,
+        gcs_credentials_path=root_cfg.GCS_CREDENTIALS_PATH,
+        gcs_project_id=root_cfg.GCS_PROJECT_ID,
+    )
 
     if args.reset_state:
         print("Resetting state — all files will be re-downloaded.")
@@ -132,6 +148,7 @@ def pipeline_main() -> None:
     parser.add_argument("--aco", help="ACO identifier (e.g. C1234)")
     parser.add_argument("--start-year", type=int, help="First performance year")
     parser.add_argument("--download-dir", default="downloads", help="Local directory for downloaded/extracted files before they are moved to the file store")
+    parser.add_argument("--file-store", help="Remote file store override — s3://, az:// / abfss://, or gs://")
     parser.add_argument("--mode", choices=["full", "incremental"], default="incremental")
     parser.add_argument("--cli-path", default=None, help="Path to acoms-cli binary")
     parser.add_argument("--state-file", default="state.json")
@@ -181,7 +198,12 @@ def pipeline_main() -> None:
         download_mode=args.mode,
         cli_path=cli_path,
         state_file=Path(args.state_file),
-        s3_bucket=args.s3_bucket or root_cfg.S3_BUCKET,
+        remote_store=(
+            f"s3://{args.s3_bucket}" if args.s3_bucket
+            else args.file_store or root_cfg.REMOTE_FILE_STORE or (
+                f"s3://{root_cfg.S3_BUCKET}" if root_cfg.S3_BUCKET else None
+            )
+        ),
         reset_state=args.reset_state,
         skip_download=args.skip_download,
         skip_process=args.skip_process,

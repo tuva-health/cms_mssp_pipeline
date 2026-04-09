@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Unified pipeline configuration.
 
 Edit this file for settings that are the same across all environments.
@@ -5,18 +7,16 @@ Put environment-specific values (credentials, ACO IDs, bucket names) in .env
 — see .env.example for the full list of supported variables.
 
 Environment variable overrides (loaded from .env, then the process environment):
-  MSSP_ACO_ID              → ACO_ID
-  MSSP_FILE_STORE          → FILE_STORE
-  MSSP_OUTPUT_TYPE         → OUTPUT_TYPE
-  MSSP_OUTPUT_LOCATION     → OUTPUT_LOCATION
-  MSSP_FULL_REFRESH        → FULL_REFRESH (set to '1' or 'true' to enable)
-  SNOWFLAKE_USERNAME       → SNOWFLAKE_USERNAME
-  SNOWFLAKE_DATABASE       → SNOWFLAKE_DATABASE
-  SNOWFLAKE_ACCOUNT        → SNOWFLAKE_ACCOUNT
-  SNOWFLAKE_RSA_KEY_PATH   → RSA_KEY_PATH
-  SNOWFLAKE_RSA_KEY_PASSPHRASE → RSA_KEY_PASSPHRASE
-  AWS_PROFILE              → AWS_PROFILE
-  AWS_REGION               → AWS_REGION
+  Shared: MSSP_ACO_ID, MSSP_FILE_STORE, MSSP_OUTPUT_TYPE,
+          MSSP_OUTPUT_LOCATION, MSSP_FULL_REFRESH, MSSP_TEMP_LOCATION,
+          MSSP_START_YEAR, MSSP_DOWNLOAD_MODE, MSSP_S3_BUCKET
+  Snowflake: SNOWFLAKE_*
+  Databricks: DATABRICKS_*
+  Redshift: REDSHIFT_*
+  BigQuery: BIGQUERY_*
+  Fabric: FABRIC_*
+  MotherDuck: MOTHERDUCK_*
+  AWS / Azure / GCS source settings: AWS_*, AZURE_*, GCS_*, GOOGLE_APPLICATION_CREDENTIALS
 """
 
 import os
@@ -41,7 +41,7 @@ from mssp_pipeline.processing.config_defs import (
 ACO_ID: str = os.environ.get("MSSP_ACO_ID", "")
 
 # Where organised ACO files are stored — the file store that both subsystems share.
-# Local path, 's3://bucket/prefix', or 'az://container/prefix'.
+# Local path, 's3://bucket/prefix', 'az://container/prefix', or 'gs://bucket/prefix'.
 FILE_STORE: str = os.environ.get("MSSP_FILE_STORE", "")
 
 # ---------------------------------------------------------------------------
@@ -49,10 +49,10 @@ FILE_STORE: str = os.environ.get("MSSP_FILE_STORE", "")
 # ---------------------------------------------------------------------------
 
 # First performance year to download
-START_YEAR: int = 2025
+START_YEAR: int = int(os.environ.get("MSSP_START_YEAR", "2025"))
 
 # 'incremental' (default) or 'full'
-DOWNLOAD_MODE: str = "incremental"
+DOWNLOAD_MODE: str = os.environ.get("MSSP_DOWNLOAD_MODE", "incremental")
 
 # Path to the acoms-cli binary shipped with this package
 CLI_PATH: Path = Path(__file__).parent.parent / "bin" / "acoms-cli"
@@ -60,20 +60,14 @@ CLI_PATH: Path = Path(__file__).parent.parent / "bin" / "acoms-cli"
 # Local state tracking file (used when not uploading to S3)
 STATE_FILE: Path = Path("state.json")
 
-# Set to an S3 bucket name to upload extracted files there and delete local copies.
-# Defaults to the bucket inferred from FILE_STORE when it is an s3:// URL.
-# Override with MSSP_S3_BUCKET to use a different bucket for downloads vs. the file store.
-def _s3_bucket_from_file_store(file_store: str) -> str | None:
-    if file_store.startswith("s3://"):
-        bucket = file_store[5:].split("/")[0]
-        return bucket or None
-    return None
+# Shared remote file store for integration upload + processing reads.
+REMOTE_FILE_STORE: str | None = FILE_STORE if FILE_STORE.startswith(
+    ("s3://", "az://", "azure://", "abfss://", "gs://")
+) else None
 
-S3_BUCKET: str | None = (
-    os.environ.get("MSSP_S3_BUCKET")
-    or _s3_bucket_from_file_store(FILE_STORE)
-    or None
-)
+# Backward-compatible alias for the legacy integration-only S3 flag.
+# Prefer FILE_STORE / REMOTE_FILE_STORE for new usage.
+S3_BUCKET: str | None = os.environ.get("MSSP_S3_BUCKET") or None
 
 # ---------------------------------------------------------------------------
 # Processing (ETL) settings
@@ -88,11 +82,11 @@ FULL_REFRESH: bool = os.environ.get("MSSP_FULL_REFRESH", "").lower() in ("1", "t
 OUTPUT_LOCATION: str = os.path.expanduser(os.environ.get("MSSP_OUTPUT_LOCATION", "~/.data/mssp.duckdb"))
 
 # MOTHERDUCK OUTPUT CONFIGURATION
-MOTHERDUCK_DATABASE: str = ""
-MOTHERDUCK_TOKEN: str = ""
+MOTHERDUCK_DATABASE: str = os.environ.get("MOTHERDUCK_DATABASE", "")
+MOTHERDUCK_TOKEN: str = os.environ.get("MOTHERDUCK_TOKEN", "")
 
 # REQUIRED FOR SNOWFLAKE / DATABRICKS / BIGQUERY / REDSHIFT / FABRIC OUTPUTS
-TEMP_LOCATION: str = "./STAGED"
+TEMP_LOCATION: str = os.path.expanduser(os.environ.get("MSSP_TEMP_LOCATION", "./STAGED"))
 
 # SNOWFLAKE OUTPUT CONFIGURATION
 RSA_KEY_PATH: str = os.path.expanduser(os.environ.get(
@@ -105,9 +99,9 @@ RSA_KEY_PATH: str = os.path.expanduser(os.environ.get(
 RSA_KEY_PASSPHRASE: str = os.environ.get("SNOWFLAKE_RSA_KEY_PASSPHRASE", "")
 SNOWFLAKE_USERNAME: str = os.environ.get("SNOWFLAKE_USERNAME", "")
 SNOWFLAKE_DATABASE: str = os.environ.get("SNOWFLAKE_DATABASE", "")
-SNOWFLAKE_SCHEMA: str = "RAW_DATA"
-SNOWFLAKE_COMPUTE_WAREHOUSE: str = "COMPUTE_WH"
-SNOWFLAKE_ACCOUNT_ROLE: str = "ACCOUNTADMIN"
+SNOWFLAKE_SCHEMA: str = os.environ.get("SNOWFLAKE_SCHEMA", "RAW_DATA")
+SNOWFLAKE_COMPUTE_WAREHOUSE: str = os.environ.get("SNOWFLAKE_COMPUTE_WAREHOUSE", "COMPUTE_WH")
+SNOWFLAKE_ACCOUNT_ROLE: str = os.environ.get("SNOWFLAKE_ACCOUNT_ROLE", "ACCOUNTADMIN")
 SNOWFLAKE_ACCOUNT: str = os.environ.get("SNOWFLAKE_ACCOUNT", "")
 
 SNOWFLAKE = SnowflakeConfig(
@@ -122,12 +116,12 @@ SNOWFLAKE = SnowflakeConfig(
 )
 
 # DATABRICKS OUTPUT CONFIGURATION
-DATABRICKS_SERVER_HOSTNAME: str = ""
-DATABRICKS_HTTP_PATH: str = ""
-DATABRICKS_ACCESS_TOKEN: str = ""
-DATABRICKS_SCHEMA: str = "raw_data"
-DATABRICKS_CATALOG: str = ""
-DATABRICKS_STAGING_PATH: str = ""
+DATABRICKS_SERVER_HOSTNAME: str = os.environ.get("DATABRICKS_SERVER_HOSTNAME", "")
+DATABRICKS_HTTP_PATH: str = os.environ.get("DATABRICKS_HTTP_PATH", "")
+DATABRICKS_ACCESS_TOKEN: str = os.environ.get("DATABRICKS_ACCESS_TOKEN", "")
+DATABRICKS_SCHEMA: str = os.environ.get("DATABRICKS_SCHEMA", "raw_data")
+DATABRICKS_CATALOG: str = os.environ.get("DATABRICKS_CATALOG", "")
+DATABRICKS_STAGING_PATH: str = os.environ.get("DATABRICKS_STAGING_PATH", "")
 
 DATABRICKS = DatabricksConfig(
     server_hostname=DATABRICKS_SERVER_HOSTNAME,
@@ -139,14 +133,14 @@ DATABRICKS = DatabricksConfig(
 )
 
 # REDSHIFT OUTPUT CONFIGURATION
-REDSHIFT_HOST: str = ""
-REDSHIFT_DATABASE: str = ""
-REDSHIFT_SCHEMA: str = "raw_data"
-REDSHIFT_USER: str = ""
-REDSHIFT_PASSWORD: str = ""
-REDSHIFT_IAM_ROLE: str = ""
-REDSHIFT_STAGING_BUCKET: str = ""
-REDSHIFT_PORT: int = 5439
+REDSHIFT_HOST: str = os.environ.get("REDSHIFT_HOST", "")
+REDSHIFT_DATABASE: str = os.environ.get("REDSHIFT_DATABASE", "")
+REDSHIFT_SCHEMA: str = os.environ.get("REDSHIFT_SCHEMA", "raw_data")
+REDSHIFT_USER: str = os.environ.get("REDSHIFT_USER", "")
+REDSHIFT_PASSWORD: str = os.environ.get("REDSHIFT_PASSWORD", "")
+REDSHIFT_IAM_ROLE: str = os.environ.get("REDSHIFT_IAM_ROLE", "")
+REDSHIFT_STAGING_BUCKET: str = os.environ.get("REDSHIFT_STAGING_BUCKET", "")
+REDSHIFT_PORT: int = int(os.environ.get("REDSHIFT_PORT", "5439"))
 
 REDSHIFT = RedshiftConfig(
     host=REDSHIFT_HOST,
@@ -160,11 +154,14 @@ REDSHIFT = RedshiftConfig(
 )
 
 # BIGQUERY OUTPUT CONFIGURATION
-BIGQUERY_PROJECT_ID: str = ""
-BIGQUERY_DATASET_ID: str = "raw_data"
-BIGQUERY_STAGING_BUCKET: str = ""
-BIGQUERY_CREDENTIALS_PATH: str = ""
-BIGQUERY_LOCATION: str = "US"
+BIGQUERY_PROJECT_ID: str = os.environ.get("BIGQUERY_PROJECT_ID", "")
+BIGQUERY_DATASET_ID: str = os.environ.get("BIGQUERY_DATASET_ID", "raw_data")
+BIGQUERY_STAGING_BUCKET: str = os.environ.get("BIGQUERY_STAGING_BUCKET", "")
+BIGQUERY_CREDENTIALS_PATH: str = os.environ.get(
+    "BIGQUERY_CREDENTIALS_PATH",
+    os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", ""),
+)
+BIGQUERY_LOCATION: str = os.environ.get("BIGQUERY_LOCATION", "US")
 
 BIGQUERY = BigQueryConfig(
     project_id=BIGQUERY_PROJECT_ID,
@@ -175,10 +172,10 @@ BIGQUERY = BigQueryConfig(
 )
 
 # FABRIC LAKEHOUSE OUTPUT CONFIGURATION
-FABRIC_ONELAKE_PATH: str = ""
-FABRIC_TENANT_ID: str = ""
-FABRIC_CLIENT_ID: str = ""
-FABRIC_CLIENT_SECRET: str = ""
+FABRIC_ONELAKE_PATH: str = os.environ.get("FABRIC_ONELAKE_PATH", "")
+FABRIC_TENANT_ID: str = os.environ.get("FABRIC_TENANT_ID", "")
+FABRIC_CLIENT_ID: str = os.environ.get("FABRIC_CLIENT_ID", "")
+FABRIC_CLIENT_SECRET: str = os.environ.get("FABRIC_CLIENT_SECRET", "")
 
 FABRIC = FabricConfig(
     onelake_path=FABRIC_ONELAKE_PATH,
@@ -197,5 +194,16 @@ AWS_ACCESS_KEY_ID: str = os.environ.get("AWS_ACCESS_KEY_ID", "")
 AWS_SECRET_ACCESS_KEY: str = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
 
 # AZURE DATA LAKE STORAGE (ADLS) SOURCE CONFIGURATION
-AZURE_STORAGE_CONNECTION_STRING: str = ""
-AZURE_STORAGE_ACCOUNT: str = ""
+AZURE_STORAGE_CONNECTION_STRING: str = os.environ.get("AZURE_STORAGE_CONNECTION_STRING", "")
+AZURE_STORAGE_ACCOUNT: str = os.environ.get("AZURE_STORAGE_ACCOUNT", "")
+
+# GOOGLE CLOUD STORAGE (GCS) SOURCE CONFIGURATION
+# Set FILE_STORE = 'gs://bucket/prefix' to read source files directly from GCS.
+# DuckDB httpfs uses GCS HMAC credentials rather than service-account JSON.
+GCS_PROJECT_ID: str = os.environ.get("GCS_PROJECT_ID", "")
+GCS_CREDENTIALS_PATH: str = os.environ.get(
+    "MSSP_GCS_CREDENTIALS_PATH",
+    os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", ""),
+)
+GCS_KEY_ID: str = os.environ.get("GCS_KEY_ID", "")
+GCS_SECRET: str = os.environ.get("GCS_SECRET", "")

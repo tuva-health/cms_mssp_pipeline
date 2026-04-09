@@ -21,11 +21,11 @@ FULL_REFRESH = os.environ.get("MSSP_FULL_REFRESH", "").lower() in ("1", "true", 
 OUTPUT_LOCATION = os.path.expanduser(os.environ.get("MSSP_OUTPUT_LOCATION", "~/.data/mssp.duckdb"))
 
 # MOTHERDUCK OUTPUT CONFIGURATION
-MOTHERDUCK_DATABASE = ''  # MotherDuck database name (the part after md:)
-MOTHERDUCK_TOKEN = ''     # Personal access token; empty = use motherduck_token env var
+MOTHERDUCK_DATABASE = os.environ.get("MOTHERDUCK_DATABASE", "")  # MotherDuck database name (the part after md:)
+MOTHERDUCK_TOKEN = os.environ.get("MOTHERDUCK_TOKEN", "")     # Personal access token; empty = use motherduck_token env var
 
 # REQUIRED FOR SNOWFLAKE / DATABRICKS / BIGQUERY OUTPUTS
-TEMP_LOCATION = './STAGED'
+TEMP_LOCATION = os.path.expanduser(os.environ.get("MSSP_TEMP_LOCATION", "./STAGED"))
 
 # SNOWFLAKE OUTPUT CONFIGURATION
 RSA_KEY_PATH = os.path.expanduser(os.environ.get(
@@ -38,9 +38,9 @@ RSA_KEY_PATH = os.path.expanduser(os.environ.get(
 RSA_KEY_PASSPHRASE = os.environ.get("SNOWFLAKE_RSA_KEY_PASSPHRASE", "")
 SNOWFLAKE_USERNAME = os.environ.get("SNOWFLAKE_USERNAME", "")
 SNOWFLAKE_DATABASE = os.environ.get("SNOWFLAKE_DATABASE", "")
-SNOWFLAKE_SCHEMA = 'RAW_DATA'
-SNOWFLAKE_COMPUTE_WAREHOUSE = 'COMPUTE_WH'
-SNOWFLAKE_ACCOUNT_ROLE = "ACCOUNTADMIN"
+SNOWFLAKE_SCHEMA = os.environ.get("SNOWFLAKE_SCHEMA", "RAW_DATA")
+SNOWFLAKE_COMPUTE_WAREHOUSE = os.environ.get("SNOWFLAKE_COMPUTE_WAREHOUSE", "COMPUTE_WH")
+SNOWFLAKE_ACCOUNT_ROLE = os.environ.get("SNOWFLAKE_ACCOUNT_ROLE", "ACCOUNTADMIN")
 SNOWFLAKE_ACCOUNT = os.environ.get("SNOWFLAKE_ACCOUNT", "")
 
 SNOWFLAKE = SnowflakeConfig(
@@ -55,12 +55,12 @@ SNOWFLAKE = SnowflakeConfig(
 )
 
 # DATABRICKS OUTPUT CONFIGURATION
-DATABRICKS_SERVER_HOSTNAME = ''
-DATABRICKS_HTTP_PATH = ''
-DATABRICKS_ACCESS_TOKEN = ''
-DATABRICKS_SCHEMA = 'raw_data'
-DATABRICKS_CATALOG = ''         # Leave empty if not using Unity Catalog
-DATABRICKS_STAGING_PATH = ''    # e.g. 's3://my-bucket/mssp-staging' or 'dbfs:/tmp/mssp'
+DATABRICKS_SERVER_HOSTNAME = os.environ.get("DATABRICKS_SERVER_HOSTNAME", "")
+DATABRICKS_HTTP_PATH = os.environ.get("DATABRICKS_HTTP_PATH", "")
+DATABRICKS_ACCESS_TOKEN = os.environ.get("DATABRICKS_ACCESS_TOKEN", "")
+DATABRICKS_SCHEMA = os.environ.get("DATABRICKS_SCHEMA", "raw_data")
+DATABRICKS_CATALOG = os.environ.get("DATABRICKS_CATALOG", "")         # Leave empty if not using Unity Catalog
+DATABRICKS_STAGING_PATH = os.environ.get("DATABRICKS_STAGING_PATH", "")    # e.g. 's3://my-bucket/mssp-staging' or 'dbfs:/tmp/mssp'
 
 DATABRICKS = DatabricksConfig(
     server_hostname=DATABRICKS_SERVER_HOSTNAME,
@@ -72,14 +72,14 @@ DATABRICKS = DatabricksConfig(
 )
 
 # REDSHIFT OUTPUT CONFIGURATION
-REDSHIFT_HOST = ''
-REDSHIFT_DATABASE = ''
-REDSHIFT_SCHEMA = 'raw_data'
-REDSHIFT_USER = ''
-REDSHIFT_PASSWORD = ''
-REDSHIFT_IAM_ROLE = ''          # e.g. 'arn:aws:iam::123456789012:role/MyRedshiftRole'
-REDSHIFT_STAGING_BUCKET = ''    # e.g. 's3://my-bucket/mssp-staging'
-REDSHIFT_PORT = 5439
+REDSHIFT_HOST = os.environ.get("REDSHIFT_HOST", "")
+REDSHIFT_DATABASE = os.environ.get("REDSHIFT_DATABASE", "")
+REDSHIFT_SCHEMA = os.environ.get("REDSHIFT_SCHEMA", "raw_data")
+REDSHIFT_USER = os.environ.get("REDSHIFT_USER", "")
+REDSHIFT_PASSWORD = os.environ.get("REDSHIFT_PASSWORD", "")
+REDSHIFT_IAM_ROLE = os.environ.get("REDSHIFT_IAM_ROLE", "")          # e.g. 'arn:aws:iam::123456789012:role/MyRedshiftRole'
+REDSHIFT_STAGING_BUCKET = os.environ.get("REDSHIFT_STAGING_BUCKET", "")    # e.g. 's3://my-bucket/mssp-staging'
+REDSHIFT_PORT = int(os.environ.get("REDSHIFT_PORT", "5439"))
 
 REDSHIFT = RedshiftConfig(
     host=REDSHIFT_HOST,
@@ -93,11 +93,11 @@ REDSHIFT = RedshiftConfig(
 )
 
 # BIGQUERY OUTPUT CONFIGURATION
-BIGQUERY_PROJECT_ID = ''
-BIGQUERY_DATASET_ID = 'raw_data'
-BIGQUERY_STAGING_BUCKET = ''    # e.g. 'gs://my-bucket/mssp-staging'
-BIGQUERY_CREDENTIALS_PATH = ''  # path to service account JSON; empty = Application Default Credentials
-BIGQUERY_LOCATION = 'US'
+BIGQUERY_PROJECT_ID = os.environ.get("BIGQUERY_PROJECT_ID", "")
+BIGQUERY_DATASET_ID = os.environ.get("BIGQUERY_DATASET_ID", "raw_data")
+BIGQUERY_STAGING_BUCKET = os.environ.get("BIGQUERY_STAGING_BUCKET", "")    # e.g. 'gs://my-bucket/mssp-staging'
+BIGQUERY_CREDENTIALS_PATH = os.environ.get("BIGQUERY_CREDENTIALS_PATH", os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", ""))  # path to service account JSON; empty = Application Default Credentials
+BIGQUERY_LOCATION = os.environ.get("BIGQUERY_LOCATION", "US")
 
 BIGQUERY = BigQueryConfig(
     project_id=BIGQUERY_PROJECT_ID,
@@ -108,10 +108,10 @@ BIGQUERY = BigQueryConfig(
 )
 
 # FABRIC LAKEHOUSE OUTPUT CONFIGURATION
-FABRIC_ONELAKE_PATH = ''   # e.g. 'abfss://MyWorkspace@onelake.dfs.fabric.microsoft.com/MyLakehouse.Lakehouse/Tables'
-FABRIC_TENANT_ID = ''
-FABRIC_CLIENT_ID = ''      # Service Principal; empty = use env/managed identity
-FABRIC_CLIENT_SECRET = ''  # Service Principal secret; empty = use env/managed identity
+FABRIC_ONELAKE_PATH = os.environ.get("FABRIC_ONELAKE_PATH", "")   # e.g. 'abfss://MyWorkspace@onelake.dfs.fabric.microsoft.com/MyLakehouse.Lakehouse/Tables'
+FABRIC_TENANT_ID = os.environ.get("FABRIC_TENANT_ID", "")
+FABRIC_CLIENT_ID = os.environ.get("FABRIC_CLIENT_ID", "")      # Service Principal; empty = use env/managed identity
+FABRIC_CLIENT_SECRET = os.environ.get("FABRIC_CLIENT_SECRET", "")  # Service Principal secret; empty = use env/managed identity
 
 FABRIC = FabricConfig(
     onelake_path=FABRIC_ONELAKE_PATH,
@@ -138,9 +138,20 @@ AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
 # to read source files directly from Azure storage.
 #
 # Option A — Connection string (explicit credentials, good for dev/CI):
-AZURE_STORAGE_CONNECTION_STRING = ''
+AZURE_STORAGE_CONNECTION_STRING = os.environ.get("AZURE_STORAGE_CONNECTION_STRING", "")
 #
 # Option B — Credential chain (managed identity, Azure CLI, env vars):
 #   Set AZURE_STORAGE_ACCOUNT and leave AZURE_STORAGE_CONNECTION_STRING empty.
 #   DuckDB will try: env vars → Azure CLI → workload identity → managed identity
-AZURE_STORAGE_ACCOUNT = ''
+AZURE_STORAGE_ACCOUNT = os.environ.get("AZURE_STORAGE_ACCOUNT", "")
+
+# GOOGLE CLOUD STORAGE (GCS) SOURCE CONFIGURATION
+# Set FILE_STORE = 'gs://bucket/prefix' to read source files directly from GCS.
+# DuckDB currently uses a GCS secret backed by HMAC credentials.
+GCS_PROJECT_ID = os.environ.get("GCS_PROJECT_ID", "")
+GCS_CREDENTIALS_PATH = os.environ.get(
+    "MSSP_GCS_CREDENTIALS_PATH",
+    os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", ""),
+)
+GCS_KEY_ID = os.environ.get("GCS_KEY_ID", "")
+GCS_SECRET = os.environ.get("GCS_SECRET", "")

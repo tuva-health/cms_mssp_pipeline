@@ -97,8 +97,8 @@ def _fetch(session, table, col="*"):
 # ---------------------------------------------------------------------------
 
 
-def test_column_names_are_uppercase(test_session, test_config, raw_dir):
-    """All output column names must be uppercase."""
+def test_column_names_are_lowercase(test_session, test_config, raw_dir):
+    """All output column names must be lowercase."""
     make_expu_xlsx(raw_dir, _all_sheets())
     _run(test_session, test_config, full_refresh=True)
 
@@ -109,7 +109,7 @@ def test_column_names_are_uppercase(test_session, test_config, raw_dir):
         ).fetchall()
     ]
     for col in cols:
-        assert col == col.upper(), f"Column {col!r} is not uppercase"
+        assert col == col.lower(), f"Column {col!r} is not lowercase"
 
 
 # ---------------------------------------------------------------------------
@@ -299,11 +299,11 @@ def test_section_column_present_in_table1(test_session, test_config, raw_dir):
             "DESCRIBE raw_data.EXPU_TABLE_1"
         ).fetchall()
     ]
-    assert "SECTION" in cols, "EXPU_TABLE_1 is missing the SECTION column"
+    assert "section" in cols, "EXPU_TABLE_1 is missing the section column"
 
 
 def test_section_column_present_in_table3(test_session, test_config, raw_dir):
-    """EXPU_TABLE_3 output must include a SECTION column."""
+    """EXPU_TABLE_3 output must include a section column."""
     make_expu_xlsx(raw_dir, _all_sheets())
     _run(test_session, test_config, full_refresh=True)
 
@@ -313,11 +313,11 @@ def test_section_column_present_in_table3(test_session, test_config, raw_dir):
             "DESCRIBE raw_data.EXPU_TABLE_3"
         ).fetchall()
     ]
-    assert "SECTION" in cols, "EXPU_TABLE_3 is missing the SECTION column"
+    assert "section" in cols, "EXPU_TABLE_3 is missing the section column"
 
 
 def test_no_section_column_in_table2(test_session, test_config, raw_dir):
-    """EXPU_TABLE_2 (unpivot mode) must NOT have a SECTION column."""
+    """EXPU_TABLE_2 (unpivot mode) must NOT have a section column."""
     make_expu_xlsx(raw_dir, _all_sheets())
     _run(test_session, test_config, full_refresh=True)
 
@@ -327,7 +327,7 @@ def test_no_section_column_in_table2(test_session, test_config, raw_dir):
             "DESCRIBE raw_data.EXPU_TABLE_2"
         ).fetchall()
     ]
-    assert "SECTION" not in cols, "EXPU_TABLE_2 should not have a SECTION column"
+    assert "section" not in cols, "EXPU_TABLE_2 should not have a section column"
 
 
 # T3_ROWS row 8 is a section header ("Number of SNF Stays", B-D all null);
@@ -408,7 +408,7 @@ def test_table2_has_period_column(test_session, test_config, raw_dir):
             "DESCRIBE raw_data.EXPU_TABLE_2"
         ).fetchall()
     ]
-    assert "PERIOD_COLUMN" in cols
+    assert "period_column" in cols
 
 
 def test_table2_has_value_column(test_session, test_config, raw_dir):
@@ -422,7 +422,7 @@ def test_table2_has_value_column(test_session, test_config, raw_dir):
             "DESCRIBE raw_data.EXPU_TABLE_2"
         ).fetchall()
     ]
-    assert "VALUE" in cols
+    assert "value" in cols
 
 
 def test_table2_no_raw_period_columns(test_session, test_config, raw_dir):

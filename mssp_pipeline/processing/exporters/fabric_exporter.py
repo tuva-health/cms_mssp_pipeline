@@ -1,5 +1,7 @@
 import os
 
+from .base import normalize_identifier, normalize_query
+
 
 class FabricExporter:
     """
@@ -36,6 +38,8 @@ class FabricExporter:
         self.full_refresh = full_refresh
 
     def export(self, query: str, table_name: str, duckdb_connection) -> None:
+        table_name = normalize_identifier(table_name)
+        query = normalize_query(query, duckdb_connection)
         local_parquet = os.path.join(self.staging_dir, f"{table_name}.parquet")
 
         if os.path.exists(local_parquet):
@@ -57,13 +61,14 @@ class FabricExporter:
 
     def get_existing_file_paths(self, table_name: str, duckdb_connection) -> list:
         """Return distinct FILE_PATH values from the existing Delta table, or [] if not found."""
+        table_name = normalize_identifier(table_name)
         from deltalake import DeltaTable
         try:
             dt = DeltaTable(self._table_path(table_name), storage_options=self._storage_options())
             paths = (
                 dt.to_pyarrow_dataset()
-                  .to_table(columns=['FILE_PATH'])
-                  .to_pydict()['FILE_PATH']
+                  .to_table(columns=['file_path'])
+                  .to_pydict()['file_path']
             )
             print(f"  Found {len(paths)} existing FILE_PATH(s) in Fabric for {table_name}")
             return paths

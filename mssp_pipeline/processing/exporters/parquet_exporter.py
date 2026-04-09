@@ -1,7 +1,8 @@
 import os
 
+from .base import normalize_identifier, normalize_query
 
-_CLOUD_PREFIXES = ('s3://', 'az://', 'azure://', 'abfss://')
+_CLOUD_PREFIXES = ('s3://', 'az://', 'azure://', 'abfss://', 'gs://')
 
 
 class ParquetExporter:
@@ -22,6 +23,8 @@ class ParquetExporter:
             return False
 
     def export(self, query: str, table_name: str, duckdb_connection) -> None:
+        table_name = normalize_identifier(table_name)
+        query = normalize_query(query, duckdb_connection)
         destination = self._destination(table_name)
         existing = self._file_exists(duckdb_connection, destination)
 
@@ -61,6 +64,7 @@ class ParquetExporter:
         locations (s3://, az://, abfss://) are handled correctly — os.path.exists()
         always returns False for cloud URIs.
         """
+        table_name = normalize_identifier(table_name)
         destination = self._destination(table_name)
         try:
             return [

@@ -262,8 +262,8 @@ def _count(session, table):
 # ---------------------------------------------------------------------------
 
 
-def test_column_names_are_uppercased(test_session, test_config, raw_dir):
-    """All data column names in the output must be uppercased."""
+def test_column_names_are_lowercased(test_session, test_config, raw_dir):
+    """All data column names in the output must be lowercased."""
     make_mcqm_zip(raw_dir, _all_sheets([ROW_A_BENE]))
     _run(test_session, test_config, full_refresh=True)
 
@@ -274,7 +274,7 @@ def test_column_names_are_uppercased(test_session, test_config, raw_dir):
         ).fetchall()
     ]
     for col in cols:
-        assert col == col.upper(), f"Column {col!r} is not uppercase"
+        assert col == col.lower(), f"Column {col!r} is not lowercase"
 
 
 # ---------------------------------------------------------------------------

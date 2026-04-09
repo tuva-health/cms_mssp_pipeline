@@ -6,7 +6,7 @@ from pathlib import Path
 from .cli import run_list, run_view, run_download
 from .config import Config
 from .parser import FileEntry, parse_list, parse_view
-from .s3_uploader import S3Uploader
+from .remote_store import build_remote_uploader
 from .state import StateManager
 
 
@@ -14,7 +14,7 @@ class Downloader:
     def __init__(self, config: Config, state: StateManager):
         self.config = config
         self.state = state
-        self._uploader = S3Uploader(config.s3_bucket) if config.s3_bucket else None
+        self._uploader = build_remote_uploader(config)
 
     def run(self) -> None:
         cfg = self.config
@@ -80,10 +80,10 @@ class Downloader:
         self._extract_and_cleanup(output_dir)
 
         if self._uploader:
-            s3_prefix = f"{cfg.aco}/{year}/{code}"
-            self._uploader.upload_and_delete(output_dir, s3_prefix)
+            remote_prefix = f"{cfg.aco}/{year}/{code}"
+            self._uploader.upload_and_delete(output_dir, remote_prefix)
             for entry in to_download:
-                self.state.mark_uploaded(cfg.aco, year, code, entry.filename, entry.last_updated, s3_prefix)
+                self.state.mark_uploaded(cfg.aco, year, code, entry.filename, entry.last_updated, remote_prefix)
         else:
             for entry in to_download:
                 self.state.mark_downloaded(cfg.aco, year, code, entry.filename, entry.last_updated)

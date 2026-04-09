@@ -40,7 +40,7 @@ Session closed.
 # Helpers
 # ---------------------------------------------------------------------------
 
-def make_config(tmp_path, s3_bucket=None) -> Config:
+def make_config(tmp_path, remote_store=None) -> Config:
     from datetime import date
     return Config(
         aco="C1234",
@@ -49,7 +49,9 @@ def make_config(tmp_path, s3_bucket=None) -> Config:
         state_file=tmp_path / "state.json",
         cli_path=Path("./acoms-cli"),
         staging_dir=tmp_path / "staging",  # isolated staging area for tests
-        s3_bucket=s3_bucket,
+        remote_store=remote_store,
+        azure_storage_account="acct",
+        gcs_project_id="project-1",
     )
 
 
@@ -248,22 +250,22 @@ Session closed.
 
 
 # ---------------------------------------------------------------------------
-# S3 mode tests
+# Remote upload mode tests
 # ---------------------------------------------------------------------------
 
 @patch("mssp_pipeline.integration.downloader.run_download")
 @patch("mssp_pipeline.integration.downloader.run_view")
 @patch("mssp_pipeline.integration.downloader.run_list")
-@patch("mssp_pipeline.integration.downloader.S3Uploader")
-def test_s3_uploads_and_deletes_local_files(mock_uploader_cls, mock_list, mock_view, mock_download, tmp_path):
-    cfg = make_config(tmp_path, s3_bucket="my-bucket")
+@patch("mssp_pipeline.integration.downloader.build_remote_uploader")
+def test_s3_uploads_and_deletes_local_files(mock_uploader_factory, mock_list, mock_view, mock_download, tmp_path):
+    cfg = make_config(tmp_path, remote_store="s3://my-bucket")
     state = StateManager(cfg.state_file)
 
     mock_list.return_value = LIST_ONE_CODE
     mock_view.return_value = VIEW_TWO_FILES
 
     mock_uploader = MagicMock()
-    mock_uploader_cls.return_value = mock_uploader
+    mock_uploader_factory.return_value = mock_uploader
 
     def fake_download(cli_path, aco, year, code, created_after=None):
         cfg.staging_dir.mkdir(parents=True, exist_ok=True)
@@ -284,28 +286,22 @@ def test_s3_uploads_and_deletes_local_files(mock_uploader_cls, mock_list, mock_v
     downloader = Downloader(cfg, state)
     downloader.run()
 
-    # S3Uploader was constructed with the right bucket
-    mock_uploader_cls.assert_called_once_with("my-bucket")
-
-    # upload_and_delete was called with the correct prefix
     out_dir = cfg.output_dir / "C1234" / str(cfg.current_year) / "116"
     mock_uploader.upload_and_delete.assert_called_once_with(out_dir, f"C1234/{cfg.current_year}/116")
-
-    # Local files were deleted by the simulated upload
     assert not list(out_dir.rglob("*"))
 
 
 @patch("mssp_pipeline.integration.downloader.run_download")
 @patch("mssp_pipeline.integration.downloader.run_view")
 @patch("mssp_pipeline.integration.downloader.run_list")
-@patch("mssp_pipeline.integration.downloader.S3Uploader")
-def test_s3_marks_uploaded_in_state(mock_uploader_cls, mock_list, mock_view, mock_download, tmp_path):
-    cfg = make_config(tmp_path, s3_bucket="my-bucket")
+@patch("mssp_pipeline.integration.downloader.build_remote_uploader")
+def test_s3_marks_uploaded_in_state(mock_uploader_factory, mock_list, mock_view, mock_download, tmp_path):
+    cfg = make_config(tmp_path, remote_store="s3://my-bucket")
     state = StateManager(cfg.state_file)
 
     mock_list.return_value = LIST_ONE_CODE
     mock_view.return_value = VIEW_TWO_FILES
-    mock_uploader_cls.return_value = MagicMock()
+    mock_uploader_factory.return_value = MagicMock()
 
     def fake_download(cli_path, aco, year, code, created_after=None):
         cfg.staging_dir.mkdir(parents=True, exist_ok=True)
@@ -321,15 +317,16 @@ def test_s3_marks_uploaded_in_state(mock_uploader_cls, mock_list, mock_view, moc
     assert state.is_uploaded("C1234", cfg.current_year, 116, "P.C1234.ACO.ZCY25.D250212.T1202370.zip", "2025-02-12T22:13:12.000Z")
 
     record = state._data["downloaded"]["C1234"][str(cfg.current_year)]["116"]["P.C1234.ACO.ZCY25.D250122.T1621240.zip"]
+    assert record["remote_prefix"] == f"C1234/{cfg.current_year}/116"
     assert record["s3_prefix"] == f"C1234/{cfg.current_year}/116"
 
 
 @patch("mssp_pipeline.integration.downloader.run_download")
 @patch("mssp_pipeline.integration.downloader.run_view")
 @patch("mssp_pipeline.integration.downloader.run_list")
-@patch("mssp_pipeline.integration.downloader.S3Uploader")
-def test_s3_skips_already_uploaded_files(mock_uploader_cls, mock_list, mock_view, mock_download, tmp_path):
-    cfg = make_config(tmp_path, s3_bucket="my-bucket")
+@patch("mssp_pipeline.integration.downloader.build_remote_uploader")
+def test_s3_skips_already_uploaded_files(mock_uploader_factory, mock_list, mock_view, mock_download, tmp_path):
+    cfg = make_config(tmp_path, remote_store="s3://my-bucket")
     state = StateManager(cfg.state_file)
 
     # Pre-populate state as already uploaded
@@ -338,7 +335,7 @@ def test_s3_skips_already_uploaded_files(mock_uploader_cls, mock_list, mock_view
 
     mock_list.return_value = LIST_ONE_CODE
     mock_view.return_value = VIEW_TWO_FILES
-    mock_uploader_cls.return_value = MagicMock()
+    mock_uploader_factory.return_value = MagicMock()
 
     downloader = Downloader(cfg, state)
     downloader.run()
@@ -349,10 +346,10 @@ def test_s3_skips_already_uploaded_files(mock_uploader_cls, mock_list, mock_view
 @patch("mssp_pipeline.integration.downloader.run_download")
 @patch("mssp_pipeline.integration.downloader.run_view")
 @patch("mssp_pipeline.integration.downloader.run_list")
-@patch("mssp_pipeline.integration.downloader.S3Uploader")
-def test_s3_does_not_skip_downloaded_but_not_uploaded(mock_uploader_cls, mock_list, mock_view, mock_download, tmp_path):
+@patch("mssp_pipeline.integration.downloader.build_remote_uploader")
+def test_s3_does_not_skip_downloaded_but_not_uploaded(mock_uploader_factory, mock_list, mock_view, mock_download, tmp_path):
     """A file marked as downloaded (but lacking uploaded_at) must be re-processed in S3 mode."""
-    cfg = make_config(tmp_path, s3_bucket="my-bucket")
+    cfg = make_config(tmp_path, remote_store="s3://my-bucket")
     state = StateManager(cfg.state_file)
 
     # Mark as downloaded only — simulates a crash between download and upload
@@ -360,7 +357,7 @@ def test_s3_does_not_skip_downloaded_but_not_uploaded(mock_uploader_cls, mock_li
 
     mock_list.return_value = LIST_ONE_CODE
     mock_view.return_value = VIEW_ONE_FILE
-    mock_uploader_cls.return_value = MagicMock()
+    mock_uploader_factory.return_value = MagicMock()
 
     def fake_download(cli_path, aco, year, code, created_after=None):
         cfg.staging_dir.mkdir(parents=True, exist_ok=True)
@@ -372,3 +369,52 @@ def test_s3_does_not_skip_downloaded_but_not_uploaded(mock_uploader_cls, mock_li
     downloader.run()
 
     mock_download.assert_called_once()
+
+
+@patch("mssp_pipeline.integration.downloader.run_download")
+@patch("mssp_pipeline.integration.downloader.run_view")
+@patch("mssp_pipeline.integration.downloader.run_list")
+@patch("mssp_pipeline.integration.downloader.build_remote_uploader")
+def test_azure_marks_uploaded_in_state(mock_uploader_factory, mock_list, mock_view, mock_download, tmp_path):
+    cfg = make_config(tmp_path, remote_store="az://container/base")
+    state = StateManager(cfg.state_file)
+
+    mock_list.return_value = LIST_ONE_CODE
+    mock_view.return_value = VIEW_ONE_FILE
+    mock_uploader_factory.return_value = MagicMock()
+
+    def fake_download(cli_path, aco, year, code, created_after=None):
+        cfg.staging_dir.mkdir(parents=True, exist_ok=True)
+        make_fake_zip(cfg.staging_dir, "P.C1234.ACO.ZCY25.D250122.T1621240.zip")
+
+    mock_download.side_effect = fake_download
+
+    Downloader(cfg, state).run()
+
+    record = state._data["downloaded"]["C1234"][str(cfg.current_year)]["116"]["P.C1234.ACO.ZCY25.D250122.T1621240.zip"]
+    assert record["remote_prefix"] == f"C1234/{cfg.current_year}/116"
+
+
+@patch("mssp_pipeline.integration.downloader.run_download")
+@patch("mssp_pipeline.integration.downloader.run_view")
+@patch("mssp_pipeline.integration.downloader.run_list")
+@patch("mssp_pipeline.integration.downloader.build_remote_uploader")
+def test_gcs_skips_already_uploaded_files(mock_uploader_factory, mock_list, mock_view, mock_download, tmp_path):
+    cfg = make_config(tmp_path, remote_store="gs://bucket/base")
+    state = StateManager(cfg.state_file)
+    state.mark_uploaded(
+        "C1234",
+        cfg.current_year,
+        116,
+        "P.C1234.ACO.ZCY25.D250122.T1621240.zip",
+        "2025-01-24T14:33:13.000Z",
+        f"C1234/{cfg.current_year}/116",
+    )
+
+    mock_list.return_value = LIST_ONE_CODE
+    mock_view.return_value = VIEW_ONE_FILE
+    mock_uploader_factory.return_value = MagicMock()
+
+    Downloader(cfg, state).run()
+
+    mock_download.assert_not_called()

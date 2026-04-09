@@ -9,5 +9,5 @@ class BNEXFileDef:
 
 
 BNEX_FILE_DEFS: List[BNEXFileDef] = [
-    BNEXFileDef("BENEFICIARY_EXCLUSIONS", "BNEX*.xml"),
+    BNEXFileDef("beneficiary_exclusions", "BNEX*.xml"),
 ]

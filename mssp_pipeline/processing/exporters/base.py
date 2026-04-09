@@ -1,6 +1,18 @@
 from typing import Protocol, runtime_checkable
 
 
+def normalize_identifier(name: str) -> str:
+    """Normalize a table or column name to lowercase for cross-warehouse consistency."""
+    return name.lower()
+
+
+def normalize_query(query: str, conn) -> str:
+    """Wrap query so all output column names are lowercase."""
+    cols = conn.execute(f"DESCRIBE SELECT * FROM ({query}) AS _q").fetchall()
+    aliases = ", ".join(f'"{c[0]}" AS {c[0].lower()}' for c in cols)
+    return f"SELECT {aliases} FROM ({query}) AS _q"
+
+
 @runtime_checkable
 class Exporter(Protocol):
     """

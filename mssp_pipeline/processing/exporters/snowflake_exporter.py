@@ -2,6 +2,8 @@ import os
 from snowflake import connector
 from cryptography.hazmat.primitives import serialization
 
+from .base import normalize_identifier, normalize_query
+
 
 class SnowflakeExporter:
     """
@@ -24,6 +26,8 @@ class SnowflakeExporter:
         self.full_refresh = full_refresh
 
     def export(self, query: str, table_name: str, duckdb_connection) -> None:
+        table_name = normalize_identifier(table_name)
+        query = normalize_query(query, duckdb_connection)
         parquet_path = os.path.join(self.staging_dir, f'{table_name}.parquet')
         if os.path.exists(parquet_path):
             os.remove(parquet_path)
@@ -41,6 +45,7 @@ class SnowflakeExporter:
 
     def get_existing_file_paths(self, table_name: str, duckdb_connection) -> list:
         """Return distinct FILE_PATH values from the existing Snowflake table, or [] if not found."""
+        table_name = normalize_identifier(table_name)
         full_table_name = f"{self.sf_config.schema}.{table_name}"
         private_key = self._load_rsa_key()
         snowflake_conn = connector.connect(

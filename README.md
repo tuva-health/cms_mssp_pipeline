@@ -1,6 +1,6 @@
 # mssp_pipeline
 
-Combined MSSP ACO data pipeline. Downloads CMS ACO Datahub files and processes them into structured tables — in a single repo, with a single config file.
+Combined MSSP ACO data pipeline. Downloads CMS ACO Datahub files and processes them into structured tables, with runtime configuration loaded from a project `.env` file.
 
 ## Overview
 
@@ -10,7 +10,7 @@ Two subsystems, one package:
 
 2. **Processing** — reads the downloaded files with DuckDB and exports structured tables to one of 8 output backends. Supports 8 source file types. Incremental by default: only rows from new source files are appended.
 
-Both subsystems share `ACO_ID`, `FILE_STORE`, and AWS credentials from a single `config.py`.
+Both subsystems share `ACO_ID`, `FILE_STORE`, and cloud credentials from the same `.env` file.
 
 ---
 
@@ -28,6 +28,12 @@ Both subsystems share `ACO_ID`, `FILE_STORE`, and AWS credentials from a single 
 git clone <repo-url>
 cd mssp_pipeline
 uv sync --group dev
+```
+
+Create a local environment file from the example template:
+
+```bash
+cp .env.example .env
 ```
 
 To include a cloud output backend, add its extra:
@@ -49,15 +55,18 @@ uv run mssp-download --configure
 
 This creates `config.txt` in the project root. Do not commit this file.
 
-### Edit Configuration
+### Configure `.env`
 
-Open `mssp_pipeline/config.py` and set at minimum:
+Set at minimum:
 
-```python
-ACO_ID = 'A1234'              # Your ACO identifier
-FILE_STORE = '/path/to/data'  # Local path, s3://bucket/prefix, or az://container/prefix
-OUTPUT_TYPE = 'PARQUET'       # See Output Backends below
+```dotenv
+MSSP_ACO_ID=A1234
+MSSP_FILE_STORE=/path/to/data
+MSSP_OUTPUT_TYPE=PARQUET
+MSSP_OUTPUT_LOCATION=/path/to/output/parquet
 ```
+
+Use `.env` for environment-specific settings such as ACO IDs, file stores, credentials, and backend destinations. `mssp_pipeline/config.py` loads `.env` automatically, so you should not need to edit Python config for normal setup.
 
 ### Run
 
@@ -76,13 +85,13 @@ uv run mssp-pipeline
 
 ## CLI Reference
 
-All three commands accept overrides for the most common config values:
+All three commands accept overrides for the most common `.env` values:
 
 ### `mssp-download`
 
 ```
---aco ACO_ID           ACO identifier (default: config.ACO_ID)
---start-year YEAR      First performance year to download (default: config.START_YEAR)
+--aco ACO_ID           ACO identifier (default: MSSP_ACO_ID)
+--start-year YEAR      First performance year to download (default: MSSP_START_YEAR or config default)
 --mode incremental|full
                        Incremental skips already-downloaded files (default: incremental)
 --output-dir DIR       Local directory for downloaded files (default: downloads/)
@@ -96,9 +105,9 @@ All three commands accept overrides for the most common config values:
 ### `mssp-process`
 
 ```
---aco ACO_ID           Override config.ACO_ID
---file-store DIR       Override config.FILE_STORE (source directory override)
---output-type TYPE     Override config.OUTPUT_TYPE
+--aco ACO_ID           Override MSSP_ACO_ID
+--file-store DIR       Override MSSP_FILE_STORE (source directory override)
+--output-type TYPE     Override MSSP_OUTPUT_TYPE
 --full-refresh         Drop and recreate all output tables (default: incremental)
 ```
 
@@ -114,76 +123,81 @@ Accepts all arguments from both commands above, plus:
 
 ### Environment variable overrides
 
-Any config value can be overridden at runtime without editing `config.py`:
+`.env` values are loaded first, then any process environment variables override them at runtime:
 
-| Variable | Config setting |
+| Variable | Purpose |
 |---|---|
-| `MSSP_ACO_ID` | `ACO_ID` |
-| `MSSP_FILE_STORE` | `FILE_STORE` |
-| `MSSP_OUTPUT_TYPE` | `OUTPUT_TYPE` |
-| `MSSP_OUTPUT_LOCATION` | `OUTPUT_LOCATION` |
-| `MSSP_FULL_REFRESH` | `FULL_REFRESH` (set to `1` or `true`) |
-| `SNOWFLAKE_RSA_KEY_PASSPHRASE` | `RSA_KEY_PASSPHRASE` |
+| `MSSP_ACO_ID` | Shared ACO identifier |
+| `MSSP_FILE_STORE` | Shared source/download store |
+| `MSSP_START_YEAR` | First performance year to download |
+| `MSSP_DOWNLOAD_MODE` | `incremental` or `full` download mode |
+| `MSSP_OUTPUT_TYPE` | Export backend |
+| `MSSP_OUTPUT_LOCATION` | Output path for `PARQUET` or `DUCKDB` |
+| `MSSP_TEMP_LOCATION` | Local staging directory for cloud exporters |
+| `MSSP_FULL_REFRESH` | Full rebuild when set to `1`, `true`, or `yes` |
+| `MSSP_S3_BUCKET` | Optional alternate S3 bucket for downloads/state |
+| `SNOWFLAKE_*`, `DATABRICKS_*`, `BIGQUERY_*`, `REDSHIFT_*`, `FABRIC_*`, `MOTHERDUCK_*` | Exporter-specific settings |
+| `AWS_*`, `AZURE_*`, `GCS_*` | Cloud file store settings |
 
 ---
 
 ## Configuration
 
-All settings live in `mssp_pipeline/config.py`. The most commonly edited fields:
+Most day-to-day settings should live in `.env`. `mssp_pipeline/config.py` remains the defaults/loader layer, but normal project setup should happen through environment variables.
 
 ### Shared
 
-```python
-ACO_ID = 'A1234'
-FILE_STORE = '/path/to/downloads'  # local, s3://bucket/prefix, or az://container/prefix
+```dotenv
+MSSP_ACO_ID=A1234
+MSSP_FILE_STORE=/path/to/downloads
 ```
 
 | Variable | Description |
 |---|---|
-| `ACO_ID` | Your ACO identifier (e.g. `A1234`) — shared by both subsystems |
-| `FILE_STORE` | Where organised ACO files live — local path, s3://bucket/prefix, or az://container/prefix |
+| `MSSP_ACO_ID` | Your ACO identifier (e.g. `A1234`) — shared by both subsystems |
+| `MSSP_FILE_STORE` | Where organised ACO files live — local path, `s3://bucket/prefix`, `az://container/prefix`, `abfss://...`, or `gs://bucket/prefix` |
 
 ### Processing output
 
-```python
-OUTPUT_TYPE = 'PARQUET'   # See Output Backends below
-FULL_REFRESH = False      # True = drop and recreate all tables on every run
-OUTPUT_LOCATION = '~/.data/output.duckdb'  # for PARQUET or DUCKDB outputs
-TEMP_LOCATION = './STAGED'                 # for cloud outputs (staging parquet files)
+```dotenv
+MSSP_OUTPUT_TYPE=PARQUET
+MSSP_FULL_REFRESH=false
+MSSP_OUTPUT_LOCATION=~/.data/output
+MSSP_TEMP_LOCATION=./STAGED
 ```
 
 ### AWS (when FILE_STORE is s3://)
 
-```python
-AWS_REGION = 'us-east-1'
-AWS_PROFILE = 'my-profile'   # Named profile from ~/.aws/credentials (recommended)
-AWS_ACCESS_KEY_ID = ''        # Set only if not using a profile or IAM role
-AWS_SECRET_ACCESS_KEY = ''
+```dotenv
+AWS_REGION=us-east-1
+AWS_PROFILE=my-profile
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
 ```
 
 ### Azure (when FILE_STORE is az:// or abfss://)
 
-```python
-# Option A — connection string
-AZURE_STORAGE_CONNECTION_STRING = 'DefaultEndpointsProtocol=https;...'
+```dotenv
+# Option A - connection string
+AZURE_STORAGE_CONNECTION_STRING='DefaultEndpointsProtocol=https;...'
 
-# Option B — credential chain (managed identity, Azure CLI, env vars)
-AZURE_STORAGE_ACCOUNT = 'mystorageaccount'
+# Option B - credential chain (managed identity, Azure CLI, env vars)
+AZURE_STORAGE_ACCOUNT=mystorageaccount
 ```
 
 ### Download
 
-```python
-START_YEAR = 2025
-DOWNLOAD_MODE = 'incremental'   # or 'full'
-S3_BUCKET = None                # Set to a bucket name to upload and delete local copies
+```dotenv
+MSSP_START_YEAR=2025
+MSSP_DOWNLOAD_MODE=incremental
+MSSP_S3_BUCKET=
 ```
 
 ---
 
 ## Output Backends
 
-Select with `OUTPUT_TYPE` in `config.py`. Each backend requires its own config block — see the comments in `config.py` for all fields.
+Select with `MSSP_OUTPUT_TYPE` in `.env`. Each backend requires its own variables.
 
 | `OUTPUT_TYPE` | Destination | Extra to install | Auth |
 |---|---|---|---|
@@ -197,6 +211,96 @@ Select with `OUTPUT_TYPE` in `config.py`. Each backend requires its own config b
 | `FABRIC` | Power BI Fabric lakehouse | `--extra fabric` | Service principal or managed identity |
 
 All backends support incremental mode. The pipeline tracks which source files have already been loaded (by `FILE_PATH`) and only appends rows from new files.
+
+### Example `.env` blocks for every exporter
+
+#### `PARQUET`
+
+```dotenv
+MSSP_OUTPUT_TYPE=PARQUET
+MSSP_OUTPUT_LOCATION=/path/to/output/parquet
+```
+
+#### `DUCKDB`
+
+```dotenv
+MSSP_OUTPUT_TYPE=DUCKDB
+MSSP_OUTPUT_LOCATION=~/.data/mssp.duckdb
+```
+
+#### `MOTHERDUCK`
+
+```dotenv
+MSSP_OUTPUT_TYPE=MOTHERDUCK
+MOTHERDUCK_DATABASE=mssp_raw
+MOTHERDUCK_TOKEN=md_token_here
+```
+
+#### `SNOWFLAKE`
+
+```dotenv
+MSSP_OUTPUT_TYPE=SNOWFLAKE
+MSSP_TEMP_LOCATION=./STAGED
+SNOWFLAKE_USERNAME=svc_mssp
+SNOWFLAKE_ACCOUNT=acme-org.us-east-1
+SNOWFLAKE_DATABASE=MSSP
+SNOWFLAKE_SCHEMA=RAW_DATA
+SNOWFLAKE_COMPUTE_WAREHOUSE=COMPUTE_WH
+SNOWFLAKE_ACCOUNT_ROLE=ACCOUNTADMIN
+SNOWFLAKE_RSA_KEY_PATH=~/.ssh/snowflake_rsa_key.p8
+SNOWFLAKE_RSA_KEY_PASSPHRASE=
+```
+
+#### `DATABRICKS`
+
+```dotenv
+MSSP_OUTPUT_TYPE=DATABRICKS
+MSSP_TEMP_LOCATION=./STAGED
+DATABRICKS_SERVER_HOSTNAME=adb-1234567890123456.7.azuredatabricks.net
+DATABRICKS_HTTP_PATH=/sql/1.0/warehouses/abc123def456
+DATABRICKS_ACCESS_TOKEN=dapiXXXXXXXXXXXXXXXX
+DATABRICKS_CATALOG=main
+DATABRICKS_SCHEMA=raw_data
+DATABRICKS_STAGING_PATH=dbfs:/tmp/mssp-staging
+```
+
+#### `BIGQUERY`
+
+```dotenv
+MSSP_OUTPUT_TYPE=BIGQUERY
+MSSP_TEMP_LOCATION=./STAGED
+BIGQUERY_PROJECT_ID=my-gcp-project
+BIGQUERY_DATASET_ID=raw_data
+BIGQUERY_STAGING_BUCKET=gs://my-mssp-staging
+BIGQUERY_CREDENTIALS_PATH=/path/to/service-account.json
+BIGQUERY_LOCATION=US
+```
+
+#### `REDSHIFT`
+
+```dotenv
+MSSP_OUTPUT_TYPE=REDSHIFT
+MSSP_TEMP_LOCATION=./STAGED
+REDSHIFT_HOST=example-cluster.abc123.us-east-1.redshift.amazonaws.com
+REDSHIFT_PORT=5439
+REDSHIFT_DATABASE=dev
+REDSHIFT_SCHEMA=raw_data
+REDSHIFT_USER=etl_user
+REDSHIFT_PASSWORD=super-secret-password
+REDSHIFT_IAM_ROLE=arn:aws:iam::123456789012:role/RedshiftCopyRole
+REDSHIFT_STAGING_BUCKET=s3://my-mssp-staging
+```
+
+#### `FABRIC`
+
+```dotenv
+MSSP_OUTPUT_TYPE=FABRIC
+MSSP_TEMP_LOCATION=./STAGED
+FABRIC_ONELAKE_PATH=abfss://MyWorkspace@onelake.dfs.fabric.microsoft.com/MyLakehouse.Lakehouse/Tables
+FABRIC_TENANT_ID=00000000-0000-0000-0000-000000000000
+FABRIC_CLIENT_ID=11111111-1111-1111-1111-111111111111
+FABRIC_CLIENT_SECRET=client-secret
+```
 
 ---
 
@@ -223,7 +327,7 @@ Every output table includes `FILE_PATH`, `FILE_NAME`, `DIRECTORY_NAME`, and `FIL
 
 ```
 mssp_pipeline/
-├── config.py           ← edit this: ACO_ID, FILE_STORE, OUTPUT_TYPE, credentials
+├── config.py           ← loads .env and provides shared defaults
 ├── pipeline.py         ← end-to-end orchestrator (download → process)
 ├── __main__.py         ← CLI: mssp-download, mssp-process, mssp-pipeline
 │
@@ -244,7 +348,7 @@ mssp_pipeline/
 
 ### Key design decisions
 
-**Single config file.** `ACO_ID` and `FILE_STORE` are defined once and shared by both subsystems — no drift between download destination and processing source.
+**Shared environment config.** `.env` is loaded once and shared by both subsystems, so download and processing stay aligned on `MSSP_ACO_ID`, `MSSP_FILE_STORE`, and exporter credentials.
 
 **DuckDB for all I/O.** Files are read directly by DuckDB using community extensions (`zipfs` for zip-embedded CSVs, `rusty_sheet` for S3-hosted xlsx, `excel` for local xlsx). No Python-side parsing or temp file extraction.
 

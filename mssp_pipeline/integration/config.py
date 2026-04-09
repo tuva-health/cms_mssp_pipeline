@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -12,8 +14,12 @@ class Config:
     # Directory the CLI downloads zip files into (must contain config.txt).
     # Defaults to cwd (project root). Override in tests to keep them isolated.
     staging_dir: Path = field(default_factory=lambda: Path("."))
-    # When set, extracted files are uploaded to this S3 bucket and local copies deleted.
-    s3_bucket: str | None = None
+    # When set, extracted files are uploaded to this remote store and local copies deleted.
+    remote_store: str | None = None
+    azure_storage_connection_string: str = ""
+    azure_storage_account: str = ""
+    gcs_credentials_path: str = ""
+    gcs_project_id: str = ""
 
     @property
     def current_year(self) -> int:

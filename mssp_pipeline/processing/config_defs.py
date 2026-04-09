@@ -61,13 +61,13 @@ def validate_config(cfg) -> None:
 
     def _require(var_name: str, value: str, context: str) -> None:
         if not value:
-            raise ValueError(f"{context} requires {var_name} to be set in config.py")
+            raise ValueError(f"{context} requires {var_name} to be set in .env, the environment, or config.py")
 
     def _require_dataclass_fields(obj, required_fields: list[str], context: str) -> None:
         for field_name in required_fields:
             value = getattr(obj, field_name, "")
             if not value:
-                raise ValueError(f"{context} requires {field_name} to be set in config.py")
+                raise ValueError(f"{context} requires {field_name} to be set in .env, the environment, or config.py")
 
     # --- Output backend validation ---
     if output_type in ("PARQUET", "DUCKDB"):
@@ -117,9 +117,13 @@ def validate_config(cfg) -> None:
     if file_store.startswith("s3://"):
         _require("AWS_REGION", cfg.AWS_REGION, "S3 FILE_STORE")
 
+    elif file_store.startswith("gs://"):
+        _require("GCS_KEY_ID", cfg.GCS_KEY_ID, "GCS FILE_STORE")
+        _require("GCS_SECRET", cfg.GCS_SECRET, "GCS FILE_STORE")
+
     elif file_store.startswith(("az://", "azure://", "abfss://")):
         if not cfg.AZURE_STORAGE_CONNECTION_STRING and not cfg.AZURE_STORAGE_ACCOUNT:
             raise ValueError(
                 "Azure FILE_STORE requires either AZURE_STORAGE_CONNECTION_STRING or "
-                "AZURE_STORAGE_ACCOUNT to be set in config.py"
+                "AZURE_STORAGE_ACCOUNT to be set in .env, the environment, or config.py"
             )

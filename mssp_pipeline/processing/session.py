@@ -54,6 +54,8 @@ class DuckDBSession:
         self.connection.execute("INSTALL rusty_sheet FROM community; LOAD rusty_sheet;")
         if self._config.FILE_STORE.startswith("s3://"):
             self._configure_s3()
+        elif self._config.FILE_STORE.startswith("gs://"):
+            self._configure_gcs()
         elif self._config.FILE_STORE.startswith(("az://", "azure://", "abfss://")):
             self._configure_azure()
 
@@ -134,7 +136,7 @@ class DuckDBSession:
                 else:
                     raise RuntimeError(
                         "S3 credentials could not be resolved. Set AWS_ACCESS_KEY_ID and "
-                        "AWS_SECRET_ACCESS_KEY in config.py or as environment variables, "
+                        "AWS_SECRET_ACCESS_KEY in .env, the environment, or config.py, "
                         "or ensure ~/.aws/credentials has a [default] profile."
                     )
 
@@ -212,8 +214,32 @@ class DuckDBSession:
             """)
         else:
             raise ValueError(
-                "ADLS source requires AZURE_STORAGE_CONNECTION_STRING or AZURE_STORAGE_ACCOUNT in config"
+                "ADLS source requires AZURE_STORAGE_CONNECTION_STRING or AZURE_STORAGE_ACCOUNT in .env, the environment, or config"
             )
+
+    def _configure_gcs(self):
+        self.connection.execute("INSTALL httpfs FROM core; LOAD httpfs;")
+
+        credentials_path = getattr(self._config, "GCS_CREDENTIALS_PATH", "")
+        if credentials_path:
+            os.environ.setdefault("GOOGLE_APPLICATION_CREDENTIALS", credentials_path)
+
+        key_id = getattr(self._config, "GCS_KEY_ID", "")
+        secret = getattr(self._config, "GCS_SECRET", "")
+        if not key_id or not secret:
+            raise ValueError(
+                "GCS source requires GCS_KEY_ID and GCS_SECRET in .env, the environment, or config"
+            )
+
+        project_id = getattr(self._config, "GCS_PROJECT_ID", "")
+        project_clause = f", PROJECT_ID '{project_id}'" if project_id else ""
+        self.connection.execute(f"""
+            CREATE OR REPLACE SECRET gcs_credentials (
+                TYPE GCS,
+                KEY_ID '{key_id}',
+                SECRET '{secret}'{project_clause}
+            )
+        """)
 
     def close(self):
         self.connection.close()

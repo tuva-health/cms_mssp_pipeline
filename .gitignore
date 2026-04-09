@@ -15,9 +15,11 @@ __pycache__/
 .venv/
 dist/
 build/
+.pytest_cache/
 
 # uv
 .uv/
+uv.lock
 
 # Environment
 .env
@@ -27,3 +29,4 @@ build/
 .DS_Store
 .idea/
 .vscode/
+.claude
