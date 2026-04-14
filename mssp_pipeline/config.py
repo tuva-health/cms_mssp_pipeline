@@ -20,6 +20,7 @@ Environment variable overrides (loaded from .env, then the process environment):
 """
 
 import os
+from dataclasses import dataclass, fields
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -207,3 +208,60 @@ GCS_CREDENTIALS_PATH: str = os.environ.get(
 )
 GCS_KEY_ID: str = os.environ.get("GCS_KEY_ID", "")
 GCS_SECRET: str = os.environ.get("GCS_SECRET", "")
+
+
+@dataclass
+class RuntimeConfig:
+    """Typed runtime configuration shared by integration + processing."""
+
+    # Shared
+    ACO_ID: str
+    FILE_STORE: str
+
+    # Integration
+    START_YEAR: int
+    DOWNLOAD_MODE: str
+    CLI_PATH: Path
+    STATE_FILE: Path
+    REMOTE_FILE_STORE: str | None
+    S3_BUCKET: str | None
+
+    # Processing
+    OUTPUT_TYPE: str
+    FULL_REFRESH: bool
+    OUTPUT_LOCATION: str
+    MOTHERDUCK_DATABASE: str
+    MOTHERDUCK_TOKEN: str
+    TEMP_LOCATION: str
+
+    # Backend configs
+    SNOWFLAKE: SnowflakeConfig
+    DATABRICKS: DatabricksConfig
+    REDSHIFT: RedshiftConfig
+    BIGQUERY: BigQueryConfig
+    FABRIC: FabricConfig
+
+    # Source access
+    AWS_REGION: str
+    AWS_PROFILE: str
+    AWS_ACCESS_KEY_ID: str
+    AWS_SECRET_ACCESS_KEY: str
+    AZURE_STORAGE_CONNECTION_STRING: str
+    AZURE_STORAGE_ACCOUNT: str
+    GCS_PROJECT_ID: str
+    GCS_CREDENTIALS_PATH: str
+    GCS_KEY_ID: str
+    GCS_SECRET: str
+
+
+def runtime_values() -> dict[str, object]:
+    """Return config values that map directly to RuntimeConfig fields."""
+    names = {f.name for f in fields(RuntimeConfig)}
+    return {name: globals()[name] for name in names}
+
+
+def runtime_config(**overrides: object) -> RuntimeConfig:
+    """Build a mutable typed runtime config with optional overrides."""
+    values = runtime_values()
+    values.update({k: v for k, v in overrides.items() if v is not None})
+    return RuntimeConfig(**values)

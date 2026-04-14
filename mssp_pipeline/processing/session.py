@@ -1,6 +1,5 @@
 import duckdb
 import os
-import sys
 
 
 class DuckDBSession:
@@ -10,11 +9,7 @@ class DuckDBSession:
 
     def __init__(self, config):
         self._config = config
-        try:
-            self.connection = self._connect(config)
-        except Exception as e:
-            print(f"❌ Error initializing DuckDB ({config.OUTPUT_TYPE}): {e}")
-            sys.exit(1)
+        self.connection = self._connect(config)
         self._load_extensions()
 
     def _connect(self, config) -> duckdb.DuckDBPyConnection:

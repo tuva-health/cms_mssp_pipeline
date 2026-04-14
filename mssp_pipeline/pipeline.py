@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from types import SimpleNamespace
 
 
 def run(
@@ -19,6 +18,7 @@ def run(
     reset_state: bool = False,
     skip_download: bool = False,
     skip_process: bool = False,
+    cleanup_download_dir: bool = False,
     processing_config=None,
 ) -> None:
     """Run the full download → process pipeline.
@@ -40,11 +40,13 @@ def run(
         reset_state:       Wipe the download state before running (force re-download).
         skip_download:     Skip the download step (process already-present files).
         skip_process:      Skip the processing step (download only).
+        cleanup_download_dir:
+                           Delete the local download directory after the run.
+                           Defaults to False (opt-in cleanup).
         processing_config: Config object for the processing step. If None, loads
-                           from mssp_pipeline.processing.config and overrides
-                           ACO_ID and FILE_STORE with the values passed here.
+                           from mssp_pipeline.config.
     """
-    download_dir = Path(download_dir) if not isinstance(download_dir, str) else download_dir
+    download_dir = Path(download_dir)
 
     if cli_path is None:
         cli_path = Path(__file__).parent.parent / "bin" / "acoms-cli"
@@ -80,7 +82,7 @@ def run(
             gcs_project_id=root_cfg.GCS_PROJECT_ID,
         )
 
-        if reset_state:
+        if reset_state or download_mode == "full":
             print("Resetting download state — all files will be re-downloaded.")
             state.reset()
 
@@ -94,12 +96,9 @@ def run(
         from mssp_pipeline.processing import run as process_run
 
         if processing_config is None:
-            from mssp_pipeline.processing import config as _proc_cfg
-            # Override the shared fields with the values passed to this function
-            # so both steps always operate on the same ACO and directory.
-            processing_config = SimpleNamespace(**{
-                k: getattr(_proc_cfg, k) for k in dir(_proc_cfg) if not k.startswith("_")
-            })
+            from mssp_pipeline import config as root_cfg
+            processing_config = root_cfg.runtime_config()
+
         processing_config.ACO_ID = aco
         processing_config.FILE_STORE = remote_store or str(download_dir)
 
@@ -107,15 +106,9 @@ def run(
         process_run(processing_config)
         print("[process] Done.")
 
-    # Clean up the local download directory once both steps have completed.
-    # raw_dir is always a local path — acoms-cli can only write to the local
-    # filesystem, so even when files are also uploaded to S3, an intermediate
-    # local copy was created.  The S3Uploader removes file contents after
-    # upload, but leaves the (now-empty) directory tree behind; rmtree takes
-    # care of that remainder.  We skip cleanup when either step was skipped:
-    # if download was skipped the directory isn't ours to delete, and if
-    # process was skipped the files may still be needed.
-    if not skip_download and not skip_process:
+    # Optional local cleanup (opt-in): acoms-cli always writes to local disk
+    # first, even when a remote store is used.
+    if cleanup_download_dir and not skip_download:
         dl_path = Path(download_dir)
         if dl_path.exists():
             shutil.rmtree(dl_path)

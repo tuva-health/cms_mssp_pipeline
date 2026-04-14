@@ -79,6 +79,9 @@ uv run mssp-process
 
 # Full pipeline: download then process
 uv run mssp-pipeline
+
+# Validate configuration and local prerequisites
+uv run mssp-validate --target pipeline
 ```
 
 ---
@@ -119,6 +122,41 @@ Accepts all arguments from both commands above, plus:
 --download-dir DIR     Local intermediate directory for downloaded files before processing
 --skip-download        Skip the download phase (process only)
 --skip-process         Skip the processing phase (download only)
+--cleanup-download-dir Delete local download-dir after run (opt-in)
+```
+
+### `mssp-validate`
+
+```
+--target download|process|pipeline
+                       Validate only one phase (default: pipeline)
+--cli-path PATH        Optional acoms-cli path override for download checks
+--format text|json     Human-readable or machine-readable output (default: text)
+--strict               Treat warnings as failures (non-zero exit)
+```
+
+`mssp-validate` warnings (non-fatal by default, fatal with `--strict`):
+
+- `MSSP_START_YEAR` is in the future (likely returns no files)
+- `MSSP_FILE_STORE` is a relative local path (works locally, less reliable for scheduled/CI runs)
+- Cloud `MSSP_OUTPUT_TYPE` with default `MSSP_TEMP_LOCATION=./STAGED` (recommend explicit staging path)
+- `MSSP_S3_BUCKET` and `MSSP_FILE_STORE` appear to point to different stores (legacy override may be confusing)
+
+JSON output example (useful for scripts/automation):
+
+```bash
+uv run mssp-validate --target pipeline --format json --strict
+```
+
+```json
+{
+  "target": "pipeline",
+  "strict": true,
+  "ok": false,
+  "info": ["acoms-cli found: /path/to/bin/acoms-cli"],
+  "warnings": ["MSSP_FILE_STORE='downloads' is a relative path; use an absolute path for scheduled/CI runs"],
+  "errors": []
+}
 ```
 
 ### Environment variable overrides
