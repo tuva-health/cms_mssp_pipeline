@@ -123,6 +123,10 @@ Accepts all arguments from both commands above, plus:
 --skip-download        Skip the download phase (process only)
 --skip-process         Skip the processing phase (download only)
 --cleanup-download-dir Delete local download-dir after run (opt-in)
+--run-id ID            Optional run id for manifest file naming
+--resume-run-id ID     Resume from prior run (skip phases marked completed)
+--resume-latest        Resume from the newest manifest in --manifest-dir
+--manifest-dir DIR     Directory for run manifests (default: .runs)
 ```
 
 ### `mssp-validate`
@@ -133,6 +137,7 @@ Accepts all arguments from both commands above, plus:
 --cli-path PATH        Optional acoms-cli path override for download checks
 --format text|json     Human-readable or machine-readable output (default: text)
 --strict               Treat warnings as failures (non-zero exit)
+--live                 Perform live filesystem/credential checks when possible
 ```
 
 `mssp-validate` warnings (non-fatal by default, fatal with `--strict`):
@@ -141,6 +146,11 @@ Accepts all arguments from both commands above, plus:
 - `MSSP_FILE_STORE` is a relative local path (works locally, less reliable for scheduled/CI runs)
 - Cloud `MSSP_OUTPUT_TYPE` with default `MSSP_TEMP_LOCATION=./STAGED` (recommend explicit staging path)
 - `MSSP_S3_BUCKET` and `MSSP_FILE_STORE` appear to point to different stores (legacy override may be confusing)
+
+Each pipeline run writes a manifest at `.runs/<run-id>.json` with phase status,
+errors, and event timestamps for auditability and resume support. At run end,
+the CLI also prints a one-line summary with run id, elapsed time, phase status,
+and event count.
 
 JSON output example (useful for scripts/automation):
 
@@ -152,11 +162,33 @@ uv run mssp-validate --target pipeline --format json --strict
 {
   "target": "pipeline",
   "strict": true,
+  "live": false,
   "ok": false,
   "info": ["acoms-cli found: /path/to/bin/acoms-cli"],
   "warnings": ["MSSP_FILE_STORE='downloads' is a relative path; use an absolute path for scheduled/CI runs"],
   "errors": []
 }
+```
+
+### `mssp-runs`
+
+Inspect run manifests written by `mssp-pipeline`.
+
+```
+--manifest-dir DIR     Directory containing run manifests (default: .runs)
+--limit N              Max runs to list (newest first, default: 20)
+--run-id ID            Show details for a single run id
+--format text|json     Human-readable or machine-readable output (default: text)
+```
+
+Examples:
+
+```bash
+# List latest runs
+uv run mssp-runs
+
+# Inspect a specific run
+uv run mssp-runs --run-id 20260414T153000Z
 ```
 
 ### Environment variable overrides

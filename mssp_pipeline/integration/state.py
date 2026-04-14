@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -31,6 +34,34 @@ class StateManager:
         self.gcs_project_id = gcs_project_id
         self._data: dict = self._load()
 
+    @contextmanager
+    def _local_lock(self, timeout_seconds: float = 10.0):
+        """Best-effort local lock to avoid concurrent writers clobbering state.json."""
+        if self.remote_store:
+            yield
+            return
+
+        lock_path = self._path.with_suffix(self._path.suffix + ".lock")
+        start = time.time()
+        fd: int | None = None
+        while fd is None:
+            try:
+                fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                if (time.time() - start) >= timeout_seconds:
+                    raise TimeoutError(f"Timed out waiting for state lock: {lock_path}")
+                time.sleep(0.1)
+
+        try:
+            os.write(fd, str(os.getpid()).encode())
+            yield
+        finally:
+            os.close(fd)
+            try:
+                lock_path.unlink()
+            except FileNotFoundError:
+                pass
+
     def _load(self) -> dict:
         if self.remote_store:
             return self._load_from_remote()
@@ -58,11 +89,16 @@ class StateManager:
                 content_type="application/json",
             )
         else:
-            with open(self._path, "w") as f:
-                f.write(content)
+            with self._local_lock():
+                self._path.parent.mkdir(parents=True, exist_ok=True)
+                tmp_path = self._path.with_suffix(self._path.suffix + ".tmp")
+                with open(tmp_path, "w") as f:
+                    f.write(content)
+                tmp_path.replace(self._path)
 
     def reset(self) -> None:
-        self._data = {"last_run": None, "downloaded": {}}
+        with self._local_lock():
+            self._data = {"last_run": None, "downloaded": {}}
 
     def is_downloaded(self, aco: str, year: int, code: int, filename: str, last_updated: str) -> bool:
         """Return True if this exact file (by filename + last_updated) is already in state."""

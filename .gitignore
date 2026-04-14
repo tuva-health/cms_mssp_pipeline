@@ -8,6 +8,9 @@ downloads/
 # Processing staging directory
 STAGED/
 
+# Pipeline run manifests
+.runs/
+
 # Python
 __pycache__/
 *.py[cod]

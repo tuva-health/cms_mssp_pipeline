@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import types
 from types import SimpleNamespace
@@ -10,6 +11,7 @@ import pytest
 
 from mssp_pipeline import __main__ as cli
 from mssp_pipeline.pipeline import run as pipeline_run
+from mssp_pipeline.run_manifest import RunManifest
 
 
 def _install_fake_dotenv(monkeypatch):
@@ -172,3 +174,87 @@ def test_validate_main_strict_fails_on_warning(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "argv", ["mssp-validate", "--target", "process", "--strict"])
     with pytest.raises(SystemExit):
         cli.validate_main()
+
+
+def test_pipeline_main_resume_latest(monkeypatch, tmp_path):
+    _install_fake_dotenv(monkeypatch)
+    monkeypatch.setattr(cli, "_check_config_file", lambda: None)
+
+    manifest_dir = tmp_path / ".runs"
+    older = RunManifest("older", manifest_dir=manifest_dir)
+    older.save()
+    newer = RunManifest("newer", manifest_dir=manifest_dir)
+    newer.save()
+    os.utime(older.path, (older.path.stat().st_atime - 10, older.path.stat().st_mtime - 10))
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "mssp-pipeline",
+            "--aco",
+            "C1234",
+            "--start-year",
+            "2025",
+            "--resume-latest",
+            "--manifest-dir",
+            str(manifest_dir),
+        ],
+    )
+
+    with patch("mssp_pipeline.pipeline.run") as pipeline_run_mock:
+        cli.pipeline_main()
+
+    assert pipeline_run_mock.call_args.kwargs["resume_run_id"] == "newer"
+
+
+def test_pipeline_main_resume_latest_missing_manifest(monkeypatch, tmp_path):
+    _install_fake_dotenv(monkeypatch)
+    monkeypatch.setattr(cli, "_check_config_file", lambda: None)
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "mssp-pipeline",
+            "--aco",
+            "C1234",
+            "--start-year",
+            "2025",
+            "--resume-latest",
+            "--manifest-dir",
+            str(tmp_path / "empty_runs"),
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        cli.pipeline_main()
+
+
+def test_runs_main_lists_json(monkeypatch, tmp_path, capsys):
+    manifest_dir = tmp_path / ".runs"
+    m1 = RunManifest("run-a", manifest_dir=manifest_dir)
+    m1.set_phase("download", "completed")
+    m1.set_phase("process", "completed")
+    m1.finalize("completed")
+    m1.save()
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["mssp-runs", "--manifest-dir", str(manifest_dir), "--format", "json"],
+    )
+    cli.runs_main()
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["manifest_dir"] == str(manifest_dir)
+    assert payload["runs"][0]["run_id"] == "run-a"
+
+
+def test_runs_main_missing_run_id(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["mssp-runs", "--manifest-dir", str(tmp_path / ".runs"), "--run-id", "does-not-exist"],
+    )
+    with pytest.raises(SystemExit):
+        cli.runs_main()
