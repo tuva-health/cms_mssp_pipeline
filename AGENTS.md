@@ -1,96 +1,80 @@
 # AGENTS.md
 
-This file provides guidance to Codex when working with this repository.
-
 ## Project Overview
 
-Combined MSSP ACO pipeline — two subsystems in one repo:
+Two subsystems: **Integration** (download via `acoms-cli`) and **Processing** (ETL via DuckDB to 8 backends).
 
-1. **Integration** (`mssp_pipeline/integration/`): Downloads MSSP ACO files from the CMS ACO Datahub by wrapping the `acoms-cli` binary. Extracts zip archives. Optionally uploads to S3.
+Package entry points:
+- `mssp_pipeline/integration/` — download subsystem
+- `mssp_pipeline/processing/` — ETL subsystem
 
-2. **Processing** (`mssp_pipeline/processing/`): ETL pipeline. Reads downloaded files via DuckDB (zipfs, webbed, rusty_sheet extensions) and exports structured tables to one of 8 output backends.
-
-## Quick Start
+## Setup
 
 ```bash
+cp .env.example .env
 uv sync --group dev
-
-# First-time credential setup
-uv run mssp-download --configure
-
-# Download only
-uv run mssp-download --aco=C1234 --start-year=2020 --mode=incremental
-
-# Process only (edit mssp_pipeline/config.py first)
-uv run mssp-process
-
-# Full pipeline: download then process
-uv run mssp-pipeline --aco=C1234 --start-year=2020 --mode=incremental
+uv run mssp-download --configure  # creates config.txt
 ```
 
 ## Configuration
 
-All settings live in `mssp_pipeline/config.py`. Edit it before running:
+**Primary config method: `.env`** (loaded by `mssp_pipeline/config.py`). Edit `.env`, not Python config.
 
 | Variable | Purpose |
 |---|---|
-| `ACO_ID` | ACO identifier (e.g. `C1234`) — shared by both subsystems |
-| `FILE_STORE` | Source/output directory — shared by both subsystems |
-| `START_YEAR` | First performance year for downloads |
-| `OUTPUT_TYPE` | Processing output: `PARQUET`, `DUCKDB`, `MOTHERDUCK`, `SNOWFLAKE`, `DATABRICKS`, `BIGQUERY`, `REDSHIFT`, or `FABRIC` |
-| `FULL_REFRESH` | `False` (incremental, default) or `True` (drop and recreate all tables) |
+| `MSSP_ACO_ID` | ACO identifier (e.g. `A1234`) |
+| `MSSP_FILE_STORE` | Source/output directory (local, `s3://`, `az://`, `gs://`) |
+| `MSSP_OUTPUT_TYPE` | Backend: `PARQUET`, `DUCKDB`, `MOTHERDUCK`, `SNOWFLAKE`, `DATABRICKS`, `BIGQUERY`, `REDSHIFT`, `FABRIC` |
+| `MSSP_START_YEAR` | First performance year for downloads |
 
-Override any setting with environment variables: `MSSP_ACO_ID`, `MSSP_FILE_STORE`, `MSSP_OUTPUT_TYPE`, `MSSP_OUTPUT_LOCATION`, `MSSP_FULL_REFRESH`.
+Full list in `.env.example`.
 
-## Development
+## Running
 
 ```bash
-uv sync --group dev
+uv run mssp-download --aco=C1234 --start-year=2020 --mode=incremental
+uv run mssp-process
+uv run mssp-pipeline --aco=C1234 --start-year=2020 --mode=incremental
+uv run mssp-validate --target pipeline --strict  # pre-flight checks
+uv run mssp-runs --limit 10                      # inspect run manifests
+```
 
-# Run all tests
+## Testing
+
+```bash
 uv run pytest
-
-# Run integration subsystem tests only
 uv run pytest tests/integration/ -v
-
-# Run processing subsystem tests only
 uv run pytest tests/processing/ -v
 ```
 
-**Do NOT call the actual `acoms-cli` binary during testing.** Mock all subprocess calls.
+- **Mock `acoms-cli`** subprocess calls — never call the real binary in tests.
+- **Use PARQUET/DUCKDB output** for local development — avoid cloud backends.
 
-**Do NOT test with cloud output backends** (`SNOWFLAKE`, `DATABRICKS`, etc.) in development.
+## Binary
+
+| Platform | Path |
+|---|---|
+| macOS | `bin/acoms-cli` |
+| Linux | `bin/acoms-cli-linux` (copied to `/app/bin/acoms-cli` in Docker) |
+
+Requires `config.txt` in working directory. Generate with `mssp-download --configure`. **Do not commit.**
 
 ## Architecture
 
 ```
 mssp_pipeline/
-├── config.py           ← edit this: ACO_ID, FILE_STORE, OUTPUT_TYPE, etc.
-├── pipeline.py         ← end-to-end orchestrator (download → process)
-├── __main__.py         ← CLI: mssp-download, mssp-process, mssp-pipeline
-│
-├── integration/        ← download subsystem
-│   ├── cli.py          ← subprocess wrapper for acoms-cli (with retry)
-│   ├── config.py       ← IntegrationConfig dataclass
-│   ├── downloader.py   ← orchestrates list → view → download → extract
-│   ├── parser.py       ← regex parsing of acoms-cli output
-│   ├── s3_uploader.py  ← upload extracted files to S3
-│   └── state.py        ← JSON state tracking (local or S3)
-│
-└── processing/         ← ETL subsystem
-    ├── __init__.py     ← run(config=None) entry point
-    ├── config.py       ← processing-specific settings (read by run())
-    ├── config_defs.py  ← frozen dataclasses for cloud backend configs
-    ├── session.py      ← DuckDB connection + extension loading
-    ├── defs/           ← file definition dataclasses (one per source type)
-    ├── processors/     ← FileProcessor subclasses (Template Method pattern)
-    └── exporters/      ← Exporter implementations (Strategy pattern)
+├── config.py           # loads .env, provides typed RuntimeConfig
+├── pipeline.py         # orchestrator (download → process)
+├── __main__.py         # CLI entry points
+├── integration/        # download: cli, downloader, parser, state, s3_uploader
+└── processing/        # ETL: session, defs/, processors/, exporters/
 ```
 
-## Binary
+DuckDB reads files directly (zipfs, webbed, rusty_sheet, excel extensions) — no temp extraction.
 
-`bin/acoms-cli` is the CMS-provided CLI binary (~68 MB). It is tracked in the repo.
-If using Git LFS, run `git lfs track "bin/acoms-cli"` before committing.
+## Key Conventions
 
-The binary requires `config.txt` (API credentials) in the current working directory.
-Run `mssp-download --configure` once to create it. Do not commit `config.txt`.
+- **Incremental by default**: tracks `FILE_PATH` per table, only appends new rows.
+- **Lazy cloud imports**: heavy SDKs loaded only when matching `OUTPUT_TYPE` is active.
+- **uv.lock gitignored** — do not commit lockfile.
+- `config.txt`, `state.json`, `downloads/`, `STAGED/`, `.runs/` gitignored.

@@ -84,6 +84,19 @@ uv run mssp-pipeline
 uv run mssp-validate --target pipeline
 ```
 
+### AWS deployment guides
+
+- `docs/aws-staged-deployment-plan.md` — Foundation → Bootstrap → Activate rollout
+- `docs/aws-bootstrap-runbook.md` — operator checklist for whitelist + `config.txt` bootstrap
+- `docs/aws-ecs-container-contract.md` — ECS env/secret contract and container behavior
+- `docs/aws-iam-minimum-policies.md` — least-privilege baseline IAM templates
+- `infra/aws/ecs/taskdef-runtime.json` and `infra/aws/ecs/taskdef-bootstrap.json` — ECS task definition templates (x86_64)
+- `infra/terraform/aws/README.md` — Terraform skeleton usage for Foundation + Activate
+- `infra/clients/client.example/` — per-client overlay examples (`env.sh`, `*.tfvars`)
+- `scripts/check-client-config.sh` — validates AWS auth, required vars, and per-client tfvars before deploy
+- `scripts/build-and-push-image.sh` — builds and pushes linux/amd64 image to ECR for a client context
+- `scripts/deploy-client.sh` — wrapper to validate + apply foundation/activate and render/register ECS taskdefs; `activate` automatically resolves the latest active `mssp-pipeline-runtime` revision
+
 ---
 
 ## CLI Reference
@@ -447,11 +460,14 @@ Tests use synthetic fixture data and mock all subprocess calls. Do not run tests
 
 ## Binary
 
-`bin/acoms-cli` is the CMS-provided CLI binary (~68 MB, macOS arm64). It is not committed to git by default. If you need to track it, use Git LFS:
+`bin/acoms-cli` is the CMS-provided CLI binary used locally. For container/AWS deployments, place the Linux x86_64 binary at `bin/acoms-cli-linux` (the Docker build copies it to `/app/bin/acoms-cli`).
+
+If you need to track binaries in git, use Git LFS:
 
 ```bash
 git lfs track "bin/acoms-cli"
-git add .gitattributes bin/acoms-cli
+git lfs track "bin/acoms-cli-linux"
+git add .gitattributes bin/acoms-cli bin/acoms-cli-linux
 ```
 
-The binary requires a `config.txt` file in the current working directory. Generate it once with `mssp-download --configure`. Do not commit `config.txt`.
+The CLI requires a `config.txt` file in the current working directory. Generate it once with `mssp-download --configure` (or use the AWS bootstrap flow that stores `config.txt` in Secrets Manager). Do not commit `config.txt`.

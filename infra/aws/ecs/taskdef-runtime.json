@@ -1,0 +1,50 @@
+{
+  "family": "mssp-pipeline-runtime",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "4096",
+  "memory": "30720",
+  "ephemeralStorage": {
+    "sizeInGiB": 100
+  },
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  },
+  "executionRoleArn": "<TASK_EXECUTION_ROLE_ARN>",
+  "taskRoleArn": "<RUNTIME_TASK_ROLE_ARN>",
+  "containerDefinitions": [
+    {
+      "name": "mssp-runtime",
+      "image": "<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/mssp-pipeline:<TAG>",
+      "essential": true,
+      "command": ["mssp-pipeline"],
+      "environment": [
+        { "name": "MSSP_WORKDIR", "value": "/app" },
+        { "name": "MSSP_WRITE_CONFIG_TXT", "value": "auto" },
+        { "name": "MSSP_CLI_PATH", "value": "/app/bin/acoms-cli" },
+        { "name": "MSSP_ACO_ID", "value": "<ACO_ID>" },
+        { "name": "MSSP_FILE_STORE", "value": "<FILE_STORE_URI>" },
+        { "name": "MSSP_OUTPUT_TYPE", "value": "PARQUET" },
+        { "name": "MSSP_OUTPUT_LOCATION", "value": "<OUTPUT_URI>" },
+        { "name": "MSSP_TEMP_LOCATION", "value": "/tmp/mssp-staging" },
+        { "name": "MSSP_DOWNLOAD_MODE", "value": "incremental" },
+        { "name": "AWS_REGION", "value": "<REGION>" }
+      ],
+      "secrets": [
+        {
+          "name": "ACOMS_CONFIG_TXT",
+          "valueFrom": "<ACOMS_CONFIG_SECRET_ARN>"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/mssp-pipeline",
+          "awslogs-region": "<REGION>",
+          "awslogs-stream-prefix": "runtime"
+        }
+      }
+    }
+  ]
+}

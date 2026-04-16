@@ -10,6 +10,7 @@ class DuckDBSession:
     def __init__(self, config):
         self._config = config
         self.connection = self._connect(config)
+        self._configure_runtime_storage()
         self._load_extensions()
 
     def _connect(self, config) -> duckdb.DuckDBPyConnection:
@@ -39,6 +40,20 @@ class DuckDBSession:
             raise ValueError(
                 f"config.OUTPUT_TYPE must be PARQUET, DUCKDB, MOTHERDUCK, SNOWFLAKE, DATABRICKS, BIGQUERY, REDSHIFT, or FABRIC, got: {output_type}"
             )
+
+    def _configure_runtime_storage(self) -> None:
+        """Configure DuckDB temporary spill storage for local writable scratch paths."""
+        temp_location = getattr(self._config, "TEMP_LOCATION", "")
+        if not temp_location:
+            return
+        # DuckDB temp_directory must point to a local filesystem path. Keep cloud
+        # output locations out of this setting, but allow local staging/scratch dirs
+        # such as /tmp/mssp-staging in ECS/Fargate.
+        if temp_location.startswith(("s3://", "az://", "azure://", "abfss://", "gs://")):
+            return
+        os.makedirs(temp_location, exist_ok=True)
+        escaped = temp_location.replace("'", "''")
+        self.connection.execute(f"SET temp_directory = '{escaped}';")
 
     def _load_extensions(self):
         self.connection.execute(

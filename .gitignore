@@ -28,6 +28,14 @@ uv.lock
 .env
 .envrc.local
 
+# Client deployment overlays (keep only examples in git)
+infra/clients/*
+!infra/clients/client.example/
+!infra/clients/client.example/**
+
+# Terraform
+**/.terraform/
+
 # Editor
 .DS_Store
 .idea/

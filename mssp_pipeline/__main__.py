@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import date
 from pathlib import Path
@@ -28,6 +29,9 @@ def _check_config_file() -> None:
 def _resolve_cli_path(cli_path_arg: str | None) -> Path:
     if cli_path_arg:
         return Path(cli_path_arg).resolve()
+    env_path = os.environ.get("MSSP_CLI_PATH")
+    if env_path:
+        return Path(env_path).resolve()
     return (Path(__file__).parent.parent / "bin" / "acoms-cli").resolve()
 
 

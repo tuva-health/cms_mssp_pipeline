@@ -71,7 +71,9 @@ def run(
     download_dir = Path(download_dir)
 
     if cli_path is None:
-        cli_path = Path(__file__).parent.parent / "bin" / "acoms-cli"
+        import os
+
+        cli_path = Path(os.environ.get("MSSP_CLI_PATH", str(Path(__file__).parent.parent / "bin" / "acoms-cli")))
     if state_file is None:
         state_file = Path("state.json")
 

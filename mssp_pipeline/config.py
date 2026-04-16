@@ -55,8 +55,13 @@ START_YEAR: int = int(os.environ.get("MSSP_START_YEAR", "2025"))
 # 'incremental' (default) or 'full'
 DOWNLOAD_MODE: str = os.environ.get("MSSP_DOWNLOAD_MODE", "incremental")
 
-# Path to the acoms-cli binary shipped with this package
-CLI_PATH: Path = Path(__file__).parent.parent / "bin" / "acoms-cli"
+# Path to the acoms-cli binary shipped with this package.
+# In containers, set MSSP_CLI_PATH=/app/bin/acoms-cli when the binary is copied
+# outside the installed site-packages directory.
+CLI_PATH: Path = Path(os.environ.get(
+    "MSSP_CLI_PATH",
+    str(Path(__file__).parent.parent / "bin" / "acoms-cli"),
+))
 
 # Local state tracking file (used when not uploading to S3)
 STATE_FILE: Path = Path("state.json")

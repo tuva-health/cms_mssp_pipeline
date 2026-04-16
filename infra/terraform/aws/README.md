@@ -1,0 +1,94 @@
+# Terraform skeleton for AWS staged deployment
+
+This skeleton matches the staged rollout model:
+
+1. `foundation/` — creates default network + bootstrap prerequisites
+2. `activate/` — gated schedule enablement after bootstrap
+
+## Foundation
+
+Creates:
+- VPC (`10.42.0.0/16` by default)
+- 1 public subnet + 2 private subnets
+- Internet Gateway + NAT Gateway + Elastic IP (for CMS whitelist)
+- Route tables/associations (private subnets egress through NAT)
+- ECS cluster
+- ECS task security group (egress-all)
+- IAM roles/policies for:
+  - ECS task execution
+  - bootstrap task
+  - runtime task
+  - EventBridge -> ECS task invocation
+- CloudWatch log group
+- Secrets placeholders (`mssp/cms-api-key`, `mssp/cms-api-secret`, `mssp/acoms-config`)
+- SSM gates set to false
+
+Example:
+
+```bash
+cd infra/terraform/aws/foundation
+terraform init
+terraform apply -var region=us-east-1
+```
+
+Capture output `nat_eip_addresses` and submit to CMS whitelist.
+
+### Useful outputs from foundation
+
+- `ecs_cluster_arn`
+- `ecs_subnet_ids`
+- `ecs_security_group_ids`
+- `events_invoke_role_arn`
+- task role ARNs (execution/bootstrap/runtime)
+
+These are consumed by `activate` and task-definition rendering/registration.
+
+## Activate
+
+Checks gates:
+- `/mssp/bootstrap_complete == true`
+- `/mssp/whitelist_confirmed == true`
+- `mssp/acoms-config` current value is non-empty
+
+Then creates/enables schedule target for ECS task.
+
+By default, `activate` reads network/ECS placement values from foundation state:
+- local state: `foundation_state_backend = "local"`
+- s3 state: `foundation_state_backend = "s3"` (+ bucket/key/region vars)
+
+Example (local state):
+
+```bash
+cd infra/terraform/aws/activate
+terraform init
+terraform apply \
+  -var region=us-east-1 \
+  -var schedule_expression='cron(0 6 * * ? *)' \
+  -var runtime_task_definition_arn=arn:aws:ecs:...:task-definition/mssp-pipeline-runtime:1
+```
+
+If you use `scripts/deploy-client.sh <client> activate`, the wrapper resolves the latest active `mssp-pipeline-runtime` revision automatically and passes it to Terraform, so you do not need to update `runtime_task_definition_arn` manually after each deploy.
+
+You can still override `events_invoke_role_arn`, `ecs_cluster_arn`, `ecs_subnet_ids`, and `ecs_security_group_ids` manually if needed.
+
+## Register task definitions
+
+Use AWS CLI with rendered templates in `infra/clients/<client>/rendered/` via:
+
+```bash
+scripts/deploy-client.sh <client> render-taskdefs
+scripts/deploy-client.sh <client> register-taskdefs
+scripts/deploy-client.sh <client> activate
+```
+
+Typical image rollout:
+
+```bash
+export IMAGE_TAG=2026-04-15-oomfix
+scripts/build-and-push-image.sh <client> "$IMAGE_TAG"
+scripts/deploy-client.sh <client> render-taskdefs
+scripts/deploy-client.sh <client> register-taskdefs
+scripts/deploy-client.sh <client> activate
+```
+
+Or register directly with AWS CLI after replacing placeholders in templates under `infra/aws/ecs/`.

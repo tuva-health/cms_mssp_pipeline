@@ -1,0 +1,9 @@
+region       = "us-east-1"
+project_name = "mssp-pipeline"
+
+# Optional overrides
+# vpc_cidr = "10.42.0.0/16"
+# tags = {
+#   Environment = "dev"
+#   Owner       = "data-platform"
+# }
