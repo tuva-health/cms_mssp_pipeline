@@ -28,6 +28,28 @@ Alternative mappings:
 
 Other required env vars depend on your pipeline settings (`MSSP_*`, `AWS_*`, etc).
 
+### Snowflake runtime variant
+
+When `MSSP_OUTPUT_TYPE=SNOWFLAKE`, also provide:
+
+Non-secret env vars:
+- `SNOWFLAKE_USERNAME`
+- `SNOWFLAKE_ACCOUNT`
+- `SNOWFLAKE_DATABASE`
+- `SNOWFLAKE_SCHEMA`
+- `SNOWFLAKE_COMPUTE_WAREHOUSE`
+- `SNOWFLAKE_ACCOUNT_ROLE`
+
+Secret env vars (recommended via ECS Secrets):
+- `SNOWFLAKE_RSA_KEY_B64` (recommended; secret value should be the base64-encoded PEM private key), or `SNOWFLAKE_RSA_KEY`
+- optionally `SNOWFLAKE_RSA_KEY_PASSPHRASE`
+
+`mssp-entrypoint` materializes the key to:
+- `/tmp/snowflake_rsa_key.p8`
+
+and exports:
+- `SNOWFLAKE_RSA_KEY_PATH=/tmp/snowflake_rsa_key.p8`
+
 ### Behavior
 
 `mssp-entrypoint`:
@@ -84,6 +106,7 @@ mssp-bootstrap-config
 
 ### Runtime role
 - `secretsmanager:GetSecretValue` on `mssp/acoms-config`
+- backend-specific secret access only when the selected `MSSP_OUTPUT_TYPE` needs it
 - no access to CMS key/secret bootstrap inputs
 
 ---

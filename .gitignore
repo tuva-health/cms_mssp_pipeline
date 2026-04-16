@@ -35,6 +35,10 @@ infra/clients/*
 
 # Terraform
 **/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
 
 # Editor
 .DS_Store

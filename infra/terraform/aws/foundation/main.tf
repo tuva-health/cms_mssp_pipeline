@@ -166,6 +166,18 @@ resource "aws_secretsmanager_secret" "acoms_config" {
   tags = var.tags
 }
 
+resource "aws_secretsmanager_secret" "snowflake_rsa_key" {
+  count = var.snowflake_rsa_key_secret_name != "" ? 1 : 0
+  name  = var.snowflake_rsa_key_secret_name
+  tags  = var.tags
+}
+
+resource "aws_secretsmanager_secret" "snowflake_rsa_key_passphrase" {
+  count = var.snowflake_rsa_key_passphrase_secret_name != "" ? 1 : 0
+  name  = var.snowflake_rsa_key_passphrase_secret_name
+  tags  = var.tags
+}
+
 resource "aws_ssm_parameter" "bootstrap_complete" {
   name  = "/mssp/bootstrap_complete"
   type  = "String"
@@ -222,14 +234,15 @@ data "aws_iam_policy_document" "ecs_task_execution_secrets" {
       "secretsmanager:GetSecretValue",
       "secretsmanager:DescribeSecret",
     ]
-    resources = [
-      "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:mssp/cms-api-key",
-      "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:mssp/cms-api-key*",
-      "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:mssp/cms-api-secret",
-      "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:mssp/cms-api-secret*",
-      "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:mssp/acoms-config",
-      "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:mssp/acoms-config*",
-    ]
+    resources = compact(concat(
+      [
+        aws_secretsmanager_secret.cms_api_key.arn,
+        aws_secretsmanager_secret.cms_api_secret.arn,
+        aws_secretsmanager_secret.acoms_config.arn,
+      ],
+      aws_secretsmanager_secret.snowflake_rsa_key[*].arn,
+      aws_secretsmanager_secret.snowflake_rsa_key_passphrase[*].arn,
+    ))
   }
 
   statement {

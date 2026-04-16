@@ -7,3 +7,9 @@ project_name = "mssp-pipeline"
 #   Environment = "dev"
 #   Owner       = "data-platform"
 # }
+
+# Optional: have foundation create placeholder Secrets Manager secrets for
+# Snowflake runtime auth so ECS task execution can inject them. Store the
+# private key secret value as base64-encoded PEM content for ECS injection.
+# snowflake_rsa_key_secret_name = "mssp/snowflake/rsa-key"
+# snowflake_rsa_key_passphrase_secret_name = "mssp/snowflake/rsa-key-passphrase"

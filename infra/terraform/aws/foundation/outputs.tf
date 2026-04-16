@@ -52,3 +52,11 @@ output "runtime_task_role_arn" {
 output "events_invoke_role_arn" {
   value = aws_iam_role.events_invoke_ecs.arn
 }
+
+output "snowflake_rsa_key_secret_arn" {
+  value = try(aws_secretsmanager_secret.snowflake_rsa_key[0].arn, null)
+}
+
+output "snowflake_rsa_key_passphrase_secret_arn" {
+  value = try(aws_secretsmanager_secret.snowflake_rsa_key_passphrase[0].arn, null)
+}

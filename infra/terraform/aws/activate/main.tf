@@ -38,10 +38,10 @@ data "terraform_remote_state" "foundation_s3" {
 locals {
   foundation_outputs = var.foundation_state_backend == "s3" ? data.terraform_remote_state.foundation_s3[0].outputs : data.terraform_remote_state.foundation_local[0].outputs
 
-  effective_ecs_cluster_arn  = var.ecs_cluster_arn != "" ? var.ecs_cluster_arn : try(local.foundation_outputs.ecs_cluster_arn, "")
-  effective_ecs_subnet_ids   = length(var.ecs_subnet_ids) > 0 ? var.ecs_subnet_ids : try(local.foundation_outputs.ecs_subnet_ids, [])
-  effective_ecs_sg_ids       = length(var.ecs_security_group_ids) > 0 ? var.ecs_security_group_ids : try(local.foundation_outputs.ecs_security_group_ids, [])
-  effective_events_role_arn  = var.events_invoke_role_arn != "" ? var.events_invoke_role_arn : try(local.foundation_outputs.events_invoke_role_arn, "")
+  effective_ecs_cluster_arn = var.ecs_cluster_arn != "" ? var.ecs_cluster_arn : try(local.foundation_outputs.ecs_cluster_arn, "")
+  effective_ecs_subnet_ids  = length(var.ecs_subnet_ids) > 0 ? var.ecs_subnet_ids : try(local.foundation_outputs.ecs_subnet_ids, [])
+  effective_ecs_sg_ids      = length(var.ecs_security_group_ids) > 0 ? var.ecs_security_group_ids : try(local.foundation_outputs.ecs_security_group_ids, [])
+  effective_events_role_arn = var.events_invoke_role_arn != "" ? var.events_invoke_role_arn : try(local.foundation_outputs.events_invoke_role_arn, "")
 }
 
 data "aws_ssm_parameter" "bootstrap_complete" {

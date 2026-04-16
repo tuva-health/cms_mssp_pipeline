@@ -21,6 +21,7 @@ Creates:
   - EventBridge -> ECS task invocation
 - CloudWatch log group
 - Secrets placeholders (`mssp/cms-api-key`, `mssp/cms-api-secret`, `mssp/acoms-config`)
+- Optional backend secret placeholders such as Snowflake RSA key/passphrase secrets when configured in `foundation.tfvars`
 - SSM gates set to false
 
 Example:
@@ -40,6 +41,7 @@ Capture output `nat_eip_addresses` and submit to CMS whitelist.
 - `ecs_security_group_ids`
 - `events_invoke_role_arn`
 - task role ARNs (execution/bootstrap/runtime)
+- optional Snowflake secret ARNs if foundation created them
 
 These are consumed by `activate` and task-definition rendering/registration.
 

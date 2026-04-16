@@ -22,3 +22,15 @@ variable "runtime_s3_resource_arns" {
   description = "S3 ARNs runtime task role can access (List/Get/Put/Delete)."
   default     = ["arn:aws:s3:::*", "arn:aws:s3:::*/*"]
 }
+
+variable "snowflake_rsa_key_secret_name" {
+  type        = string
+  description = "Optional Secrets Manager secret name for Snowflake RSA private key material used by the runtime task."
+  default     = ""
+}
+
+variable "snowflake_rsa_key_passphrase_secret_name" {
+  type        = string
+  description = "Optional Secrets Manager secret name for Snowflake RSA key passphrase used by the runtime task."
+  default     = ""
+}

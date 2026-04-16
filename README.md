@@ -334,6 +334,8 @@ SNOWFLAKE_RSA_KEY_PATH=~/.ssh/snowflake_rsa_key.p8
 SNOWFLAKE_RSA_KEY_PASSPHRASE=
 ```
 
+For ECS/ECR deployments, inject the private key via Secrets Manager/ECS Secrets and let `mssp-entrypoint` materialize `/tmp/snowflake_rsa_key.p8` at runtime instead of baking a key into the image.
+
 #### `DATABRICKS`
 
 ```dotenv

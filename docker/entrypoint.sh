@@ -45,6 +45,48 @@ write_config_txt_if_provided() {
   return 1
 }
 
+install_runtime_file_from_env() {
+  local target_path="$1"
+  local plain_var="$2"
+  local b64_var="$3"
+
+  if [[ -n "${!b64_var:-}" ]]; then
+    mkdir -p "$(dirname "$target_path")"
+    printf '%s' "${!b64_var}" | base64 -d > "$target_path"
+    chmod 600 "$target_path"
+    return 0
+  fi
+
+  if [[ -n "${!plain_var:-}" ]]; then
+    mkdir -p "$(dirname "$target_path")"
+    printf '%s' "${!plain_var}" > "$target_path"
+    chmod 600 "$target_path"
+    return 0
+  fi
+
+  return 1
+}
+
+configure_backend_runtime_files() {
+  local output_type="${MSSP_OUTPUT_TYPE:-}"
+  case "$output_type" in
+    SNOWFLAKE)
+      local key_path="${SNOWFLAKE_RSA_KEY_PATH:-/tmp/snowflake_rsa_key.p8}"
+      if [[ -f "$key_path" ]]; then
+        chmod 600 "$key_path"
+        export SNOWFLAKE_RSA_KEY_PATH="$key_path"
+        return 0
+      fi
+      if install_runtime_file_from_env "$key_path" SNOWFLAKE_RSA_KEY SNOWFLAKE_RSA_KEY_B64; then
+        export SNOWFLAKE_RSA_KEY_PATH="$key_path"
+        return 0
+      fi
+      echo "[entrypoint] MSSP_OUTPUT_TYPE=SNOWFLAKE requires SNOWFLAKE_RSA_KEY, SNOWFLAKE_RSA_KEY_B64, or a preexisting SNOWFLAKE_RSA_KEY_PATH file." >&2
+      exit 1
+      ;;
+  esac
+}
+
 needs_config_txt() {
   if [[ "$#" -eq 0 ]]; then
     return 0
@@ -92,6 +134,8 @@ config_provided=false
 if write_config_txt_if_provided; then
   config_provided=true
 fi
+
+configure_backend_runtime_files
 
 case "$MSSP_WRITE_CONFIG_TXT" in
   always)

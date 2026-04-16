@@ -124,6 +124,8 @@ check_region() {
 check_render_env() {
   local missing=()
   local placeholders=()
+  local output_type="${MSSP_OUTPUT_TYPE:-PARQUET}"
+  output_type="$(echo "$output_type" | tr '[:lower:]' '[:upper:]')"
   require_cmd aws
   for name in ACO_ID FILE_STORE_BUCKET; do
     if [[ -z "${!name:-}" ]]; then
@@ -146,13 +148,57 @@ check_render_env() {
     echo "[error] Placeholder value found in env var: PROJECT_NAME=${PROJECT_NAME}" >&2
     exit 1
   fi
+  if [[ -n "$output_type" && "$output_type" == *"<"*">"* ]]; then
+    echo "[error] Placeholder value found in env var: MSSP_OUTPUT_TYPE=${output_type}" >&2
+    exit 1
+  fi
   for secret_id in mssp/cms-api-key mssp/cms-api-secret mssp/acoms-config; do
     if ! aws secretsmanager describe-secret --secret-id "$secret_id" >/dev/null 2>&1; then
       echo "[error] Required Secrets Manager secret not found or unreadable: $secret_id" >&2
       exit 1
     fi
   done
-  echo "[ok] Render env vars present (FILE_STORE_PREFIX/OUTPUT_PREFIX may be empty for bucket root)"
+  case "$output_type" in
+    SNOWFLAKE)
+      local required_snowflake_vars=(
+        SNOWFLAKE_USERNAME
+        SNOWFLAKE_ACCOUNT
+        SNOWFLAKE_DATABASE
+        SNOWFLAKE_SCHEMA
+        SNOWFLAKE_COMPUTE_WAREHOUSE
+        SNOWFLAKE_ACCOUNT_ROLE
+        SNOWFLAKE_RSA_KEY_SECRET_ID
+      )
+      local sf_missing=()
+      local sf_placeholders=()
+      for name in "${required_snowflake_vars[@]}"; do
+        if [[ -z "${!name:-}" ]]; then
+          sf_missing+=("$name")
+        elif [[ "${!name}" == *"<"*">"* ]]; then
+          sf_placeholders+=("$name=${!name}")
+        fi
+      done
+      if (( ${#sf_missing[@]} > 0 )); then
+        echo "[error] MSSP_OUTPUT_TYPE=SNOWFLAKE requires env vars: ${sf_missing[*]}" >&2
+        exit 1
+      fi
+      if (( ${#sf_placeholders[@]} > 0 )); then
+        echo "[error] Placeholder Snowflake env vars found: ${sf_placeholders[*]}" >&2
+        exit 1
+      fi
+      for secret_name in SNOWFLAKE_RSA_KEY_SECRET_ID SNOWFLAKE_RSA_KEY_PASSPHRASE_SECRET_ID; do
+        local secret_id="${!secret_name:-}"
+        if [[ -n "$secret_id" ]] && ! aws secretsmanager describe-secret --secret-id "$secret_id" >/dev/null 2>&1; then
+          echo "[error] Snowflake secret not found or unreadable: ${secret_name}=$secret_id" >&2
+          exit 1
+        fi
+      done
+      echo "[ok] Render env vars present for MSSP_OUTPUT_TYPE=SNOWFLAKE"
+      ;;
+    *)
+      echo "[ok] Render env vars present (FILE_STORE_PREFIX/OUTPUT_PREFIX may be empty for bucket root)"
+      ;;
+  esac
 }
 
 check_register_inputs() {
