@@ -72,17 +72,8 @@ expect {
 EOF
 
 if [[ ! -s ./config.txt ]]; then
-  found_config="$(find "$MSSP_WORKDIR" /root /tmp -maxdepth 4 -type f -name config.txt -size +0c -print 2>/dev/null | head -n 1 || true)"
-  if [[ -n "$found_config" && -f "$found_config" ]]; then
-    cp "$found_config" ./config.txt
-    chmod 600 ./config.txt
-    echo "Recovered config.txt from: $found_config"
-  fi
-fi
-
-if [[ ! -s ./config.txt ]]; then
-  echo "acoms-cli configure did not produce a non-empty ./config.txt" >&2
-  echo "Searched for config.txt under: $MSSP_WORKDIR /root /tmp" >&2
+  echo "acoms-cli configure did not produce a non-empty ./config.txt in $MSSP_WORKDIR" >&2
+  echo "Bootstrap expects the CLI to write config.txt in the working directory and will not recover files from other locations." >&2
   exit 1
 fi
 
