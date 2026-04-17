@@ -49,17 +49,23 @@ install_runtime_file_from_env() {
   local target_path="$1"
   local plain_var="$2"
   local b64_var="$3"
+  local plain_value="${!plain_var:-}"
+  local b64_value="${!b64_var:-}"
 
-  if [[ -n "${!b64_var:-}" ]]; then
-    mkdir -p "$(dirname "$target_path")"
-    printf '%s' "${!b64_var}" | base64 -d > "$target_path"
+  mkdir -p "$(dirname "$target_path")"
+
+  if [[ -n "$b64_value" ]]; then
+    printf '%s' "$b64_value" | base64 -d > "$target_path"
     chmod 600 "$target_path"
     return 0
   fi
 
-  if [[ -n "${!plain_var:-}" ]]; then
-    mkdir -p "$(dirname "$target_path")"
-    printf '%s' "${!plain_var}" > "$target_path"
+  if [[ -n "$plain_value" ]]; then
+    if [[ "$plain_value" == "-----BEGIN "* ]]; then
+      printf '%s' "$plain_value" > "$target_path"
+    else
+      printf '%s' "$plain_value" | base64 -d > "$target_path"
+    fi
     chmod 600 "$target_path"
     return 0
   fi

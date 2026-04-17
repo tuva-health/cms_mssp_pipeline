@@ -80,6 +80,21 @@ Then:
 2. Trigger one manual smoke run
 3. Confirm logs and output state are healthy
 
+Example manual runtime smoke test:
+
+```bash
+AWS_PROFILE=<profile> AWS_REGION=<region> aws ecs run-task \
+  --cluster <ecs-cluster-name> \
+  --launch-type FARGATE \
+  --task-definition mssp-pipeline-runtime \
+  --network-configuration 'awsvpcConfiguration={subnets=[subnet-aaa,subnet-bbb],securityGroups=[sg-ccc],assignPublicIp=DISABLED}' \
+  --count 1 \
+  --query 'tasks[0].taskArn' \
+  --output text
+
+AWS_PROFILE=<profile> AWS_REGION=<region> aws logs tail /ecs/mssp-pipeline --follow
+```
+
 ---
 
 ## 6) Rotation runbook (repeatable)

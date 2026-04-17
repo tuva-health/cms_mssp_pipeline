@@ -94,7 +94,7 @@ uv run mssp-validate --target pipeline
 - `infra/terraform/aws/README.md` — Terraform skeleton usage for Foundation + Activate
 - `infra/clients/client.example/` — per-client overlay examples (`env.sh`, `*.tfvars`)
 - `scripts/check-client-config.sh` — validates AWS auth, required vars, and per-client tfvars before deploy
-- `scripts/build-and-push-image.sh` — builds and pushes linux/amd64 image to ECR for a client context
+- `scripts/build-and-push-image.sh` — builds and pushes linux/amd64 image to ECR for a client context; automatically installs backend extras based on `MSSP_OUTPUT_TYPE` (override with `PIP_EXTRAS`)
 - `scripts/deploy-client.sh` — wrapper to validate + apply foundation/activate and render/register ECS taskdefs; `activate` automatically resolves the latest active `mssp-pipeline-runtime` revision
 
 ---
@@ -334,7 +334,7 @@ SNOWFLAKE_RSA_KEY_PATH=~/.ssh/snowflake_rsa_key.p8
 SNOWFLAKE_RSA_KEY_PASSPHRASE=
 ```
 
-For ECS/ECR deployments, inject the private key via Secrets Manager/ECS Secrets and let `mssp-entrypoint` materialize `/tmp/snowflake_rsa_key.p8` at runtime instead of baking a key into the image.
+For ECS/ECR deployments, inject the private key via Secrets Manager/ECS Secrets and let `mssp-entrypoint` materialize `/tmp/snowflake_rsa_key.p8` at runtime instead of baking a key into the image. The secret may contain raw PEM text or base64-encoded PEM.
 
 #### `DATABRICKS`
 

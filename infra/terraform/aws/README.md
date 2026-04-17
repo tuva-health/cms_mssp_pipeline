@@ -93,4 +93,6 @@ scripts/deploy-client.sh <client> register-taskdefs
 scripts/deploy-client.sh <client> activate
 ```
 
+`build-and-push-image.sh` derives Docker `PIP_EXTRAS` from `MSSP_OUTPUT_TYPE` in the client env (for example `processing,snowflake` for Snowflake). Override explicitly with `PIP_EXTRAS=...` if needed.
+
 Or register directly with AWS CLI after replacing placeholders in templates under `infra/aws/ecs/`.

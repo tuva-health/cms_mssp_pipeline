@@ -41,7 +41,8 @@ Non-secret env vars:
 - `SNOWFLAKE_ACCOUNT_ROLE`
 
 Secret env vars (recommended via ECS Secrets):
-- `SNOWFLAKE_RSA_KEY_B64` (recommended; secret value should be the base64-encoded PEM private key), or `SNOWFLAKE_RSA_KEY`
+- `SNOWFLAKE_RSA_KEY` (recommended; secret value may be raw PEM text or base64-encoded PEM)
+- optionally `SNOWFLAKE_RSA_KEY_B64`
 - optionally `SNOWFLAKE_RSA_KEY_PASSPHRASE`
 
 `mssp-entrypoint` materializes the key to:

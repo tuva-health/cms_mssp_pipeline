@@ -179,7 +179,7 @@ if output_type == 'SNOWFLAKE':
     key_secret_arn = os.environ.get('SNOWFLAKE_RSA_KEY_SECRET_ARN', '').strip()
     if not key_secret_arn:
         raise SystemExit('SNOWFLAKE_RSA_KEY_SECRET_ARN is required for SNOWFLAKE runtime render')
-    extra_secrets.append({'name': 'SNOWFLAKE_RSA_KEY_B64', 'valueFrom': key_secret_arn})
+    extra_secrets.append({'name': 'SNOWFLAKE_RSA_KEY', 'valueFrom': key_secret_arn})
     passphrase_secret_arn = os.environ.get('SNOWFLAKE_RSA_KEY_PASSPHRASE_SECRET_ARN', '').strip()
     if passphrase_secret_arn:
         extra_secrets.append({'name': 'SNOWFLAKE_RSA_KEY_PASSPHRASE', 'valueFrom': passphrase_secret_arn})

@@ -14,6 +14,7 @@ Environment overrides:
   AWS_REGION        AWS region (falls back to client env.sh or aws config)
   AWS_PROFILE       AWS profile (optional)
   MSSP_ECR_REPO     ECR repository name (default: mssp-pipeline)
+  PIP_EXTRAS        Python extras to install in the image (auto-derived from MSSP_OUTPUT_TYPE by default)
 EOF
 }
 
@@ -41,6 +42,33 @@ require_cmd() {
 require_cmd aws
 require_cmd docker
 
+extras_for_output_type() {
+  local output_type="$(echo "${1:-PARQUET}" | tr '[:lower:]' '[:upper:]')"
+  case "$output_type" in
+    SNOWFLAKE)
+      echo "processing,snowflake"
+      ;;
+    DATABRICKS)
+      echo "processing,databricks"
+      ;;
+    BIGQUERY)
+      echo "processing,bigquery"
+      ;;
+    REDSHIFT)
+      echo "processing,redshift"
+      ;;
+    FABRIC)
+      echo "processing,fabric"
+      ;;
+    PARQUET|DUCKDB|MOTHERDUCK)
+      echo "processing"
+      ;;
+    *)
+      echo "processing"
+      ;;
+  esac
+}
+
 REGION="${AWS_REGION:-${REGION:-}}"
 if [[ -z "$REGION" ]]; then
   REGION="$(aws configure get region 2>/dev/null || true)"
@@ -58,8 +86,9 @@ fi
 REPO="${MSSP_ECR_REPO:-mssp-pipeline}"
 REGISTRY="$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com"
 IMAGE_URI="$REGISTRY/$REPO:$TAG"
+PIP_EXTRAS_VALUE="${PIP_EXTRAS:-$(extras_for_output_type "${MSSP_OUTPUT_TYPE:-PARQUET}")}" 
 
-echo "[info] region=$REGION account_id=$ACCOUNT_ID repo=$REPO tag=$TAG"
+echo "[info] region=$REGION account_id=$ACCOUNT_ID repo=$REPO tag=$TAG extras=$PIP_EXTRAS_VALUE"
 
 aws ecr describe-repositories --repository-names "$REPO" --region "$REGION" >/dev/null 2>&1 || \
   aws ecr create-repository --repository-name "$REPO" --region "$REGION" >/dev/null
@@ -70,6 +99,7 @@ aws ecr get-login-password --region "$REGION" | docker login --username AWS --pa
 echo "[info] Building and pushing linux/amd64 image: $IMAGE_URI"
 docker buildx build \
   --platform linux/amd64 \
+  --build-arg "PIP_EXTRAS=$PIP_EXTRAS_VALUE" \
   --tag "$IMAGE_URI" \
   --push \
   "$ROOT_DIR"

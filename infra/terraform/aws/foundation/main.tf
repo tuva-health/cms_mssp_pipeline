@@ -183,6 +183,10 @@ resource "aws_ssm_parameter" "bootstrap_complete" {
   type  = "String"
   value = "false"
   tags  = var.tags
+
+  lifecycle {
+    ignore_changes = [value]
+  }
 }
 
 resource "aws_ssm_parameter" "whitelist_confirmed" {
@@ -190,6 +194,10 @@ resource "aws_ssm_parameter" "whitelist_confirmed" {
   type  = "String"
   value = "false"
   tags  = var.tags
+
+  lifecycle {
+    ignore_changes = [value]
+  }
 }
 
 data "aws_iam_policy_document" "ecs_task_trust" {
