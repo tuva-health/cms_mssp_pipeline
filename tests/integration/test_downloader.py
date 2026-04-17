@@ -63,6 +63,13 @@ def make_fake_zip(directory: Path, name: str) -> Path:
     return zip_path
 
 
+def make_zip_with_member(directory: Path, name: str, member_name: str, content: str = "content") -> Path:
+    zip_path = directory / name
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr(member_name, content)
+    return zip_path
+
+
 # ---------------------------------------------------------------------------
 # Non-S3 tests (existing behaviour)
 # ---------------------------------------------------------------------------
@@ -247,6 +254,58 @@ Session closed.
     out_dir = cfg.output_dir / "C1234" / str(cfg.current_year) / "116"
     assert (out_dir / "P.C1234.ACO.MBIY25.D250103.T1033540.txt").exists()
     assert state.is_downloaded("C1234", cfg.current_year, 116, "P.C1234.ACO.MBIY25.D250103.T1033540.txt", "2025-01-07T20:38:22.000Z")
+
+
+@patch("mssp_pipeline.integration.downloader.run_download")
+@patch("mssp_pipeline.integration.downloader.run_view")
+@patch("mssp_pipeline.integration.downloader.run_list")
+def test_rejects_zip_traversal_entries_without_advancing_state(mock_list, mock_view, mock_download, tmp_path):
+    cfg = make_config(tmp_path)
+    state = StateManager(cfg.state_file)
+
+    mock_list.return_value = LIST_ONE_CODE
+    mock_view.return_value = VIEW_ONE_FILE
+
+    def fake_download(cli_path, aco, year, code, created_after=None):
+        cfg.staging_dir.mkdir(parents=True, exist_ok=True)
+        make_zip_with_member(
+            cfg.staging_dir,
+            "P.C1234.ACO.ZCY25.D250122.T1621240.zip",
+            "../evil.txt",
+            "owned",
+        )
+
+    mock_download.side_effect = fake_download
+
+    downloader = Downloader(cfg, state)
+
+    with pytest.raises(ValueError, match="Unsafe archive member"):
+        downloader.run()
+
+    out_dir = cfg.output_dir / "C1234" / str(cfg.current_year) / "116"
+    assert not (out_dir.parent / "evil.txt").exists()
+    assert not state.is_downloaded(
+        "C1234",
+        cfg.current_year,
+        116,
+        "P.C1234.ACO.ZCY25.D250122.T1621240.zip",
+        "2025-01-24T14:33:13.000Z",
+    )
+
+
+def test_rejects_absolute_zip_member_paths(tmp_path):
+    cfg = make_config(tmp_path)
+    state = StateManager(cfg.state_file)
+    downloader = Downloader(cfg, state)
+
+    out_dir = cfg.output_dir / cfg.aco / str(cfg.current_year) / "116"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    make_zip_with_member(out_dir, "absolute.zip", "/tmp/evil.txt", "owned")
+
+    with pytest.raises(ValueError, match="Unsafe archive member"):
+        downloader._extract_and_cleanup(out_dir)
+
+    assert not (tmp_path / "evil.txt").exists()
 
 
 # ---------------------------------------------------------------------------

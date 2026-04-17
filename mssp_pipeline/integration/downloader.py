@@ -1,7 +1,9 @@
 """Orchestrates the view → compare → download → extract → cleanup loop."""
 
+import os
+import stat
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .cli import run_list, run_view, run_download
 from .config import Config
@@ -96,6 +98,47 @@ class Downloader:
             extract_dir.mkdir(exist_ok=True)
             print(f"    Extracting {zip_path.name} → {extract_dir.name}/")
             with zipfile.ZipFile(zip_path, "r") as zf:
-                zf.extractall(extract_dir)
+                _safe_extract_all(zf, extract_dir)
             zip_path.unlink()
             print(f"    Deleted {zip_path.name}.")
+
+
+def _safe_extract_all(zf: zipfile.ZipFile, extract_dir: Path) -> None:
+    root = extract_dir.resolve()
+    for member in zf.infolist():
+        _validate_zip_member(member, zf.filename, root)
+    for member in zf.infolist():
+        _extract_zip_member(zf, member, root)
+
+
+def _validate_zip_member(member: zipfile.ZipInfo, archive_name: str | None, root: Path) -> None:
+    member_path = PurePosixPath(member.filename)
+    if not member.filename or member.filename.endswith("/") and not member_path.parts:
+        raise ValueError(f"Unsafe archive member in {archive_name or 'archive'}: {member.filename!r}")
+    if member_path.is_absolute() or member.filename.startswith(("/", "\\")):
+        raise ValueError(f"Unsafe archive member in {archive_name or 'archive'}: {member.filename!r}")
+    if any(part == ".." for part in member_path.parts):
+        raise ValueError(f"Unsafe archive member in {archive_name or 'archive'}: {member.filename!r}")
+    if _is_link(member):
+        raise ValueError(f"Unsafe archive member in {archive_name or 'archive'}: {member.filename!r}")
+
+    target = (root / Path(*member_path.parts)).resolve()
+    if os.path.commonpath([str(root), str(target)]) != str(root):
+        raise ValueError(f"Unsafe archive member in {archive_name or 'archive'}: {member.filename!r}")
+
+
+def _extract_zip_member(zf: zipfile.ZipFile, member: zipfile.ZipInfo, root: Path) -> None:
+    member_path = PurePosixPath(member.filename)
+    target = root / Path(*member_path.parts)
+    if member.is_dir():
+        target.mkdir(parents=True, exist_ok=True)
+        return
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with zf.open(member, "r") as src, target.open("wb") as dst:
+        dst.write(src.read())
+
+
+def _is_link(member: zipfile.ZipInfo) -> bool:
+    mode = member.external_attr >> 16
+    return stat.S_ISLNK(mode)
