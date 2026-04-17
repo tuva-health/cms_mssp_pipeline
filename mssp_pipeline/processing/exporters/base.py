@@ -1,9 +1,19 @@
 from typing import Protocol, runtime_checkable
 
+from ..sql import join_identifiers, sql_string_literal, validate_identifier
+
 
 def normalize_identifier(name: str) -> str:
     """Normalize a table or column name to lowercase for cross-warehouse consistency."""
-    return name.lower()
+    return validate_identifier(name.lower(), field_name="identifier")
+
+
+def qualified_identifier(*parts: str, field_name: str = "identifier") -> str:
+    return join_identifiers(*parts, field_name=field_name)
+
+
+def string_literal(value: str) -> str:
+    return sql_string_literal(value)
 
 
 def normalize_query(query: str, conn) -> str:

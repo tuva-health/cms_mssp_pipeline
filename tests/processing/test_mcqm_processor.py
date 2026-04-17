@@ -277,6 +277,13 @@ def test_column_names_are_lowercased(test_session, test_config, raw_dir):
         assert col == col.lower(), f"Column {col!r} is not lowercase"
 
 
+def test_mcqm_handles_quotes_in_zip_paths(test_session, test_config, raw_dir):
+    make_mcqm_zip(raw_dir, _all_sheets([ROW_A_BENE]), quarter="2025Q4", time_str="0400'000")
+    _run(test_session, test_config, full_refresh=True)
+
+    assert _count(test_session, "MCQM_BENEFICIARIES") == 1
+
+
 # ---------------------------------------------------------------------------
 # Row counts
 # ---------------------------------------------------------------------------

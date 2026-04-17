@@ -2,7 +2,7 @@ import os
 from snowflake import connector
 from cryptography.hazmat.primitives import serialization
 
-from .base import normalize_identifier, normalize_query
+from .base import normalize_identifier, normalize_query, qualified_identifier, string_literal
 
 
 class SnowflakeExporter:
@@ -36,7 +36,7 @@ class SnowflakeExporter:
         is_incremental = (not self.full_refresh) and table_exists_in_sf
 
         print(f"Writing staging Parquet: {parquet_path}")
-        duckdb_connection.execute(f"COPY ({query}) TO '{parquet_path}' (FORMAT PARQUET)")
+        duckdb_connection.execute(f"COPY ({query}) TO {string_literal(parquet_path)} (FORMAT PARQUET)")
 
         if is_incremental:
             self._append_to_snowflake(parquet_path, table_name)
@@ -46,7 +46,7 @@ class SnowflakeExporter:
     def get_existing_file_paths(self, table_name: str, duckdb_connection) -> list:
         """Return distinct FILE_PATH values from the existing Snowflake table, or [] if not found."""
         table_name = normalize_identifier(table_name)
-        full_table_name = f"{self.sf_config.schema}.{table_name}"
+        full_table_name = self._table_ref(table_name)
         private_key = self._load_rsa_key()
         snowflake_conn = connector.connect(
             user=self.sf_config.username,
@@ -87,8 +87,8 @@ class SnowflakeExporter:
         try:
             cursor.execute(f"""
                 SELECT COUNT(*) FROM information_schema.tables
-                WHERE table_schema = '{self.sf_config.schema}'
-                  AND table_name   = '{table_name.upper()}'
+                WHERE table_schema = {string_literal(normalize_identifier(self.sf_config.schema).upper())}
+                  AND table_name   = {string_literal(table_name.upper())}
             """)
             return cursor.fetchone()[0] > 0
         finally:
@@ -97,7 +97,7 @@ class SnowflakeExporter:
 
     def _fetch_existing_file_paths(self, table_name: str) -> list:
         """Fetches all distinct FILE_PATH values from the existing Snowflake table."""
-        full_table_name = f"{self.sf_config.schema}.{table_name}"
+        full_table_name = self._table_ref(table_name)
         private_key = self._load_rsa_key()
         snowflake_conn = connector.connect(
             user=self.sf_config.username,
@@ -130,16 +130,16 @@ class SnowflakeExporter:
         )
         cursor = snowflake_conn.cursor()
         try:
-            stage_name = f"{self.sf_config.schema}.{table_name}_stage"
-            full_table_name = f"{self.sf_config.schema}.{table_name}"
+            stage_name = self._stage_name(table_name)
+            full_table_name = self._table_ref(table_name)
 
             cursor.execute(f"CREATE STAGE IF NOT EXISTS {stage_name}")
             print("Uploading to Snowflake...")
             cursor.execute(
-                f"PUT file://{file_location} @{stage_name} AUTO_COMPRESS=FALSE OVERWRITE=TRUE"
+                f"PUT {string_literal(f'file://{file_location}')} @{stage_name} AUTO_COMPRESS=FALSE OVERWRITE=TRUE"
             )
 
-            temp_format_name = f"TEMP_FORMAT_{table_name}"
+            temp_format_name = self._temp_format_name(table_name)
             cursor.execute(f"""
                 CREATE OR REPLACE TEMPORARY FILE FORMAT {temp_format_name}
                 TYPE = 'PARQUET'
@@ -178,23 +178,23 @@ class SnowflakeExporter:
         )
         cursor = snowflake_conn.cursor()
         try:
-            stage_name = f"{self.sf_config.schema}.{table_name}_stage"
+            stage_name = self._stage_name(table_name)
             cursor.execute(f"DROP STAGE IF EXISTS {stage_name}")
             cursor.execute(f"CREATE STAGE IF NOT EXISTS {stage_name}")
 
             print("Uploading to Snowflake...")
             cursor.execute(
-                f"PUT file://{file_location} @{stage_name} AUTO_COMPRESS=FALSE OVERWRITE=TRUE"
+                f"PUT {string_literal(f'file://{file_location}')} @{stage_name} AUTO_COMPRESS=FALSE OVERWRITE=TRUE"
             )
 
             print("Creating table...")
-            temp_format_name = f"TEMP_FORMAT_{table_name}"
+            temp_format_name = self._temp_format_name(table_name)
             cursor.execute(f"""
                 CREATE OR REPLACE TEMPORARY FILE FORMAT {temp_format_name}
                 TYPE = 'PARQUET'
             """)
 
-            full_table_name = f"{self.sf_config.schema}.{table_name}"
+            full_table_name = self._table_ref(table_name)
             cursor.execute(f"""
                 CREATE OR REPLACE TABLE {full_table_name}
                 USING TEMPLATE (
@@ -202,7 +202,7 @@ class SnowflakeExporter:
                     FROM TABLE(
                         INFER_SCHEMA(
                             LOCATION=> '@{stage_name}',
-                            FILE_FORMAT=>'{temp_format_name}'
+                            FILE_FORMAT=>{string_literal(temp_format_name)}
                         )
                     )
                 );
@@ -227,6 +227,23 @@ class SnowflakeExporter:
         finally:
             cursor.close()
             snowflake_conn.close()
+
+    def _table_ref(self, table_name: str) -> str:
+        return qualified_identifier(
+            normalize_identifier(self.sf_config.schema),
+            table_name,
+            field_name="table reference",
+        )
+
+    def _stage_name(self, table_name: str) -> str:
+        return qualified_identifier(
+            normalize_identifier(self.sf_config.schema),
+            normalize_identifier(f"{table_name}_stage"),
+            field_name="stage name",
+        )
+
+    def _temp_format_name(self, table_name: str) -> str:
+        return normalize_identifier(f"temp_format_{table_name}").upper()
 
     def _load_rsa_key(self):
         key_path = self.sf_config.rsa_key_path

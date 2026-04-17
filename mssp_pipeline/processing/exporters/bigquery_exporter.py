@@ -2,7 +2,7 @@ import os
 from google.cloud import bigquery, storage
 from google.cloud.exceptions import NotFound
 
-from .base import normalize_identifier, normalize_query
+from .base import normalize_identifier, normalize_query, string_literal
 
 
 class BigQueryExporter:
@@ -43,7 +43,7 @@ class BigQueryExporter:
         is_incremental = (not self.full_refresh) and table_exists
 
         print(f"  Writing staging Parquet: {local_parquet}")
-        duckdb_connection.execute(f"COPY ({query}) TO '{local_parquet}' (FORMAT PARQUET)")
+        duckdb_connection.execute(f"COPY ({query}) TO {string_literal(local_parquet)} (FORMAT PARQUET)")
 
         self._upload_to_gcs(local_parquet, gcs_uri)
 

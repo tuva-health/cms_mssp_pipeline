@@ -4,6 +4,7 @@ from typing import List, Tuple
 
 from .base import FileProcessor
 from ..defs.mcqm_file_defs import MCQMFileDef, MCQM_FILE_DEFS
+from ..sql import sql_string_literal
 
 
 class MCQMProcessor(FileProcessor):
@@ -47,7 +48,7 @@ class MCQMProcessor(FileProcessor):
         )
         try:
             rows = self.session.connection.execute(
-                f"SELECT * FROM glob('{pattern}')"
+                f"SELECT * FROM glob({sql_string_literal(pattern)})"
             ).fetchall()
         except Exception:
             return []
@@ -84,7 +85,7 @@ class MCQMProcessor(FileProcessor):
         for zip_path in zip_paths:
             try:
                 rows = self.session.connection.execute(
-                    f"SELECT * FROM glob('zip://{zip_path}!*.xlsx')"
+                    f"SELECT * FROM glob({sql_string_literal(f'zip://{zip_path}!*.xlsx')})"
                 ).fetchall()
             except Exception:
                 continue
@@ -119,13 +120,13 @@ class MCQMProcessor(FileProcessor):
 
             selects.append(f"""
                     SELECT *,
-                           '{file_path}'   AS FILE_PATH,
-                           '{zip_path}'    AS DIRECTORY_NAME,
-                           '{xlsx_name}'   AS FILE_NAME,
+                           {sql_string_literal(file_path)} AS FILE_PATH,
+                           {sql_string_literal(zip_path)}  AS DIRECTORY_NAME,
+                           {sql_string_literal(xlsx_name)} AS FILE_NAME,
                            {file_date_sql} AS FILE_DATE,
-                           '{period}'      AS PERIOD
-                    FROM read_xlsx('{zip_ref}',
-                                   sheet='{file_def.sheet_name}',
+                           {sql_string_literal(period)}   AS PERIOD
+                    FROM read_xlsx({sql_string_literal(zip_ref)},
+                                   sheet={sql_string_literal(file_def.sheet_name)},
                                    header=true,
                                    all_varchar=true)
                 """)
