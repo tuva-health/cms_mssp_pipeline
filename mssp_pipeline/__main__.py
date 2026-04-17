@@ -212,6 +212,7 @@ def pipeline_main() -> None:
     effective_aco = args.aco or root_cfg.ACO_ID
     effective_start_year = args.start_year if args.start_year is not None else root_cfg.START_YEAR
     effective_mode = args.mode or root_cfg.DOWNLOAD_MODE
+    effective_output_type = args.output_type or root_cfg.OUTPUT_TYPE
 
     if not args.skip_download:
         _check_config_file()
@@ -219,10 +220,20 @@ def pipeline_main() -> None:
         print("ACO ID is required. Set --aco or MSSP_ACO_ID.")
         raise SystemExit(1)
 
-    processing_config = root_cfg.runtime_config(
-        OUTPUT_TYPE=args.output_type or root_cfg.OUTPUT_TYPE,
-        FULL_REFRESH=True if args.full_refresh else root_cfg.FULL_REFRESH,
-    )
+    from mssp_pipeline.processing.config_defs import validate_config
+
+    processing_config = None
+    if not args.skip_process:
+        processing_config = root_cfg.runtime_config(
+            OUTPUT_TYPE=effective_output_type,
+            FULL_REFRESH=True if args.full_refresh else root_cfg.FULL_REFRESH,
+        )
+
+        try:
+            validate_config(processing_config)
+        except ValueError as exc:
+            print(f"Configuration error: {exc}")
+            raise SystemExit(1)
 
     from mssp_pipeline.pipeline import run as pipeline_run
 

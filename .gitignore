@@ -44,4 +44,11 @@ crash.*.log
 .DS_Store
 .idea/
 .vscode/
-.claude
+.claude/*
+!.claude/CLAUDE.md
+
+# Binaries — large CMS-provided executables
+# Track explicit files to avoid accidentally committing other binaries
+bin/*
+!bin/acoms-cli
+!bin/acoms-cli-linux

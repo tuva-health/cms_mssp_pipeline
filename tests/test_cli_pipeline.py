@@ -110,6 +110,7 @@ def test_pipeline_main_forwards_cleanup_flag(monkeypatch):
             "--start-year",
             "2025",
             "--cleanup-download-dir",
+            "--skip-process",
         ],
     )
 
@@ -117,6 +118,27 @@ def test_pipeline_main_forwards_cleanup_flag(monkeypatch):
         cli.pipeline_main()
 
     assert pipeline_run_mock.call_args.kwargs["cleanup_download_dir"] is True
+
+
+def test_pipeline_main_validates_processing_config(monkeypatch):
+    _install_fake_dotenv(monkeypatch)
+    monkeypatch.setenv("MSSP_OUTPUT_TYPE", "SNOWFLAKE")
+    monkeypatch.setattr(cli, "_check_config_file", lambda: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "mssp-pipeline",
+            "--aco",
+            "C1234",
+            "--start-year",
+            "2025",
+            "--skip-download",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        cli.pipeline_main()
 
 
 def test_validate_main_process_target_success(monkeypatch, tmp_path):
@@ -199,6 +221,7 @@ def test_pipeline_main_resume_latest(monkeypatch, tmp_path):
             "--resume-latest",
             "--manifest-dir",
             str(manifest_dir),
+            "--skip-process",
         ],
     )
 
@@ -224,6 +247,7 @@ def test_pipeline_main_resume_latest_missing_manifest(monkeypatch, tmp_path):
             "--resume-latest",
             "--manifest-dir",
             str(tmp_path / "empty_runs"),
+            "--skip-process",
         ],
     )
 

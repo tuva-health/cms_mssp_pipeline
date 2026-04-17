@@ -97,6 +97,18 @@ uv run mssp-validate --target pipeline
 - `scripts/build-and-push-image.sh` — builds and pushes linux/amd64 image to ECR for a client context; automatically installs backend extras based on `MSSP_OUTPUT_TYPE` (override with `PIP_EXTRAS`)
 - `scripts/deploy-client.sh` — wrapper to validate + apply foundation/activate and render/register ECS taskdefs; `activate` automatically resolves the latest active `mssp-pipeline-runtime` revision
 
+Recommended ECS rollout:
+
+```bash
+export IMAGE_TAG=2026-04-17-my-change
+scripts/build-and-push-image.sh <client> "$IMAGE_TAG"
+scripts/deploy-client.sh <client> render-taskdefs
+scripts/deploy-client.sh <client> register-taskdefs
+scripts/deploy-client.sh <client> activate
+```
+
+Use a fresh image tag when task definition wiring and container behavior change together (for example entrypoint/env/secret handling changes), then run a one-off smoke task before relying on the schedule.
+
 ---
 
 ## CLI Reference
@@ -334,7 +346,7 @@ SNOWFLAKE_RSA_KEY_PATH=~/.ssh/snowflake_rsa_key.p8
 SNOWFLAKE_RSA_KEY_PASSPHRASE=
 ```
 
-For ECS/ECR deployments, inject the private key via Secrets Manager/ECS Secrets and let `mssp-entrypoint` materialize `/tmp/snowflake_rsa_key.p8` at runtime instead of baking a key into the image. The secret may contain raw PEM text or base64-encoded PEM.
+For ECS/ECR deployments, inject the private key via Secrets Manager/ECS Secrets and let `mssp-entrypoint` materialize `/tmp/snowflake_rsa_key.p8` at runtime instead of baking a key into the image. The secret may contain raw PEM text or base64-encoded PEM. `scripts/deploy-client.sh` renders Snowflake runtime tasks with `SNOWFLAKE_RSA_KEY` plus optional `SNOWFLAKE_RSA_KEY_PASSPHRASE`.
 
 #### `DATABRICKS`
 
@@ -435,7 +447,7 @@ mssp_pipeline/
 
 **Shared environment config.** `.env` is loaded once and shared by both subsystems, so download and processing stay aligned on `MSSP_ACO_ID`, `MSSP_FILE_STORE`, and exporter credentials.
 
-**DuckDB for all I/O.** Files are read directly by DuckDB using community extensions (`zipfs` for zip-embedded CSVs, `rusty_sheet` for S3-hosted xlsx, `excel` for local xlsx). No Python-side parsing or temp file extraction.
+**DuckDB for all I/O.** Files are read directly by DuckDB using community extensions (`zipfs` for zip-embedded CSVs, `rusty_sheet` for S3-hosted xlsx, `excel` for local xlsx). No Python-side parsing or temp file extraction. In ECS/cloud-export runs, DuckDB temp spill is directed to local scratch via `MSSP_TEMP_LOCATION` (for example `/tmp/mssp-staging`).
 
 **Incremental by default.** Every backend tracks loaded `FILE_PATH` values. Re-running the pipeline after new files arrive appends only the new rows.
 
@@ -473,3 +485,9 @@ git add .gitattributes bin/acoms-cli bin/acoms-cli-linux
 ```
 
 The CLI requires a `config.txt` file in the current working directory. Generate it once with `mssp-download --configure` (or use the AWS bootstrap flow that stores `config.txt` in Secrets Manager). Do not commit `config.txt`.
+
+Terraform working directories and local state should also stay out of git. `.gitignore` excludes:
+- `**/.terraform/`
+- `*.tfstate`
+- `*.tfstate.*`
+- Terraform crash logs

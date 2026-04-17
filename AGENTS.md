@@ -39,6 +39,24 @@ uv run mssp-validate --target pipeline --strict  # pre-flight checks
 uv run mssp-runs --limit 10                      # inspect run manifests
 ```
 
+## AWS / ECS / ECR deployment
+
+Preferred deploy flow:
+
+```bash
+scripts/build-and-push-image.sh <client> <tag>
+scripts/deploy-client.sh <client> render-taskdefs
+scripts/deploy-client.sh <client> register-taskdefs
+scripts/deploy-client.sh <client> activate
+```
+
+Conventions:
+- `scripts/build-and-push-image.sh` derives Docker `PIP_EXTRAS` from `MSSP_OUTPUT_TYPE` (e.g. `processing,snowflake` for Snowflake).
+- `scripts/deploy-client.sh activate` automatically resolves the latest active `mssp-pipeline-runtime` task definition ARN.
+- Client `env.sh` files should use overridable defaults such as `export IMAGE_TAG="${IMAGE_TAG:-latest}"` so shell overrides work.
+- When taskdef wiring and container behavior change together, use a fresh image tag, then render/register/activate before smoke testing.
+- For manual smoke runs, use a one-off `aws ecs run-task` against the latest runtime revision and tail `/ecs/mssp-pipeline` logs.
+
 ## Testing
 
 ```bash
@@ -76,5 +94,9 @@ DuckDB reads files directly (zipfs, webbed, rusty_sheet, excel extensions) — n
 
 - **Incremental by default**: tracks `FILE_PATH` per table, only appends new rows.
 - **Lazy cloud imports**: heavy SDKs loaded only when matching `OUTPUT_TYPE` is active.
+- **DuckDB temp spill**: ECS runtime uses local scratch (`MSSP_TEMP_LOCATION`, usually `/tmp/mssp-staging`) and DuckDB `temp_directory` points there for spill-to-disk.
+- **Snowflake ECS secret handling**: runtime accepts `SNOWFLAKE_RSA_KEY` as raw PEM or base64-encoded PEM; entrypoint materializes `/tmp/snowflake_rsa_key.p8` and exports `SNOWFLAKE_RSA_KEY_PATH`.
+- **Foundation gate parameters**: Terraform creates `/mssp/bootstrap_complete` and `/mssp/whitelist_confirmed` with initial `false`, but now ignores later value changes so bootstrap/ops can flip them to `true` without later foundation applies resetting them.
 - **uv.lock gitignored** — do not commit lockfile.
+- Terraform `.terraform/`, `terraform.tfstate*`, and crash logs should stay untracked.
 - `config.txt`, `state.json`, `downloads/`, `STAGED/`, `.runs/` gitignored.
