@@ -16,6 +16,7 @@ Then fill in values and run:
 ```bash
 scripts/check-client-config.sh acme --for all
 scripts/deploy-client.sh acme all
+scripts/deploy-and-smoke-client.sh acme 2026-04-17 -- mssp-validate --target process --strict
 ```
 
 ## Files
