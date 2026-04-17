@@ -3,12 +3,24 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
 
+_RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def validate_run_id(run_id: str) -> str:
+    if not run_id or not run_id.strip():
+        raise ValueError("Invalid run id: must be non-empty and use only letters, numbers, dot, underscore, or hyphen")
+    if run_id != run_id.strip() or ".." in run_id or "/" in run_id or "\\" in run_id or not _RUN_ID_PATTERN.fullmatch(run_id):
+        raise ValueError("Invalid run id: must use only letters, numbers, dot, underscore, or hyphen")
+    return run_id
 
 
 def _atomic_write(path: Path, content: str) -> None:
@@ -22,7 +34,15 @@ def latest_run_id(manifest_dir: Path | str = ".runs") -> str | None:
     base = Path(manifest_dir)
     if not base.exists():
         return None
-    candidates = [p for p in base.glob("*.json") if p.is_file()]
+    candidates = []
+    for path in base.glob("*.json"):
+        if not path.is_file():
+            continue
+        try:
+            validate_run_id(path.stem)
+        except ValueError:
+            continue
+        candidates.append(path)
     if not candidates:
         return None
     latest = max(candidates, key=lambda p: p.stat().st_mtime)
@@ -31,11 +51,11 @@ def latest_run_id(manifest_dir: Path | str = ".runs") -> str | None:
 
 class RunManifest:
     def __init__(self, run_id: str, manifest_dir: Path | str = ".runs"):
-        self.run_id = run_id
+        self.run_id = validate_run_id(run_id)
         self.manifest_dir = Path(manifest_dir)
-        self.path = self.manifest_dir / f"{run_id}.json"
+        self.path = self.manifest_dir / f"{self.run_id}.json"
         self.data: dict = {
-            "run_id": run_id,
+            "run_id": self.run_id,
             "status": "running",
             "started_at": _utc_now(),
             "ended_at": None,

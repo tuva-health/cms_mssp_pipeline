@@ -231,6 +231,38 @@ def test_pipeline_main_resume_latest(monkeypatch, tmp_path):
     assert pipeline_run_mock.call_args.kwargs["resume_run_id"] == "newer"
 
 
+def test_pipeline_main_resume_latest_ignores_invalid_manifest_names(monkeypatch, tmp_path):
+    _install_fake_dotenv(monkeypatch)
+    monkeypatch.setattr(cli, "_check_config_file", lambda: None)
+
+    manifest_dir = tmp_path / ".runs"
+    valid = RunManifest("valid-run", manifest_dir=manifest_dir)
+    valid.save()
+    (manifest_dir / "../../escape.json").parent.mkdir(parents=True, exist_ok=True)
+    (manifest_dir / "bad id.json").write_text("{}")
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "mssp-pipeline",
+            "--aco",
+            "C1234",
+            "--start-year",
+            "2025",
+            "--resume-latest",
+            "--manifest-dir",
+            str(manifest_dir),
+            "--skip-process",
+        ],
+    )
+
+    with patch("mssp_pipeline.pipeline.run") as pipeline_run_mock:
+        cli.pipeline_main()
+
+    assert pipeline_run_mock.call_args.kwargs["resume_run_id"] == "valid-run"
+
+
 def test_pipeline_main_resume_latest_missing_manifest(monkeypatch, tmp_path):
     _install_fake_dotenv(monkeypatch)
     monkeypatch.setattr(cli, "_check_config_file", lambda: None)
@@ -253,6 +285,54 @@ def test_pipeline_main_resume_latest_missing_manifest(monkeypatch, tmp_path):
 
     with pytest.raises(SystemExit):
         cli.pipeline_main()
+
+
+def test_pipeline_main_rejects_invalid_run_id(monkeypatch, capsys):
+    _install_fake_dotenv(monkeypatch)
+    monkeypatch.setattr(cli, "_check_config_file", lambda: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "mssp-pipeline",
+            "--aco",
+            "C1234",
+            "--start-year",
+            "2025",
+            "--run-id",
+            "../../escape",
+            "--skip-process",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        cli.pipeline_main()
+
+    assert "Invalid run id" in capsys.readouterr().out
+
+
+def test_pipeline_main_rejects_invalid_resume_run_id(monkeypatch, capsys):
+    _install_fake_dotenv(monkeypatch)
+    monkeypatch.setattr(cli, "_check_config_file", lambda: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "mssp-pipeline",
+            "--aco",
+            "C1234",
+            "--start-year",
+            "2025",
+            "--resume-run-id",
+            "bad/id",
+            "--skip-process",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        cli.pipeline_main()
+
+    assert "Invalid run id" in capsys.readouterr().out
 
 
 def test_runs_main_lists_json(monkeypatch, tmp_path, capsys):
@@ -282,3 +362,16 @@ def test_runs_main_missing_run_id(monkeypatch, tmp_path):
     )
     with pytest.raises(SystemExit):
         cli.runs_main()
+
+
+def test_runs_main_rejects_invalid_run_id(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["mssp-runs", "--manifest-dir", str(tmp_path / ".runs"), "--run-id", "bad/id"],
+    )
+
+    with pytest.raises(SystemExit):
+        cli.runs_main()
+
+    assert "Invalid run id" in capsys.readouterr().out

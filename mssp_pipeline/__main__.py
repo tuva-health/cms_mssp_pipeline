@@ -194,12 +194,27 @@ def pipeline_main() -> None:
         return
 
     from mssp_pipeline import config as root_cfg
+    from mssp_pipeline.run_manifest import validate_run_id
 
     if args.resume_latest and args.resume_run_id:
         print("Use either --resume-run-id or --resume-latest, not both.")
         raise SystemExit(1)
 
+    if args.run_id:
+        try:
+            validate_run_id(args.run_id)
+        except ValueError as exc:
+            print(str(exc))
+            raise SystemExit(1)
+
     resume_run_id = args.resume_run_id
+    if resume_run_id:
+        try:
+            validate_run_id(resume_run_id)
+        except ValueError as exc:
+            print(str(exc))
+            raise SystemExit(1)
+
     if args.resume_latest:
         from mssp_pipeline.run_manifest import latest_run_id
 
@@ -268,15 +283,20 @@ def runs_main() -> None:
     parser.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
     args = parser.parse_args()
 
-    from mssp_pipeline.run_manifest import RunManifest
+    from mssp_pipeline.run_manifest import RunManifest, validate_run_id
 
     manifest_dir = Path(args.manifest_dir)
     if args.run_id:
-        path = manifest_dir / f"{args.run_id}.json"
+        try:
+            run_id = validate_run_id(args.run_id)
+        except ValueError as exc:
+            print(str(exc))
+            raise SystemExit(1)
+        path = manifest_dir / f"{run_id}.json"
         if not path.exists():
             print(f"Run manifest not found: {path}")
             raise SystemExit(1)
-        data = RunManifest.load(args.run_id, manifest_dir=manifest_dir).data
+        data = RunManifest.load(run_id, manifest_dir=manifest_dir).data
         if args.format == "json":
             print(json.dumps(data, indent=2))
         else:
