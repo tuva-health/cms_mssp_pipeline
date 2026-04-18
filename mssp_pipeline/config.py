@@ -94,6 +94,14 @@ MOTHERDUCK_TOKEN: str = os.environ.get("MOTHERDUCK_TOKEN", "")
 # REQUIRED FOR SNOWFLAKE / DATABRICKS / BIGQUERY / REDSHIFT / FABRIC OUTPUTS
 TEMP_LOCATION: str = os.path.expanduser(os.environ.get("MSSP_TEMP_LOCATION", "./STAGED"))
 
+# Processing batch sizing. These limits cap how many source files a processor
+# includes in a single DuckDB query/export batch to reduce peak memory usage.
+PROCESS_BATCH_SIZE_DEFAULT: int = int(os.environ.get("MSSP_PROCESS_BATCH_SIZE_DEFAULT", "25"))
+PROCESS_BATCH_SIZE_CCLF: int = int(os.environ.get("MSSP_PROCESS_BATCH_SIZE_CCLF", "1"))
+PROCESS_BATCH_SIZE_MSSP: int = int(os.environ.get("MSSP_PROCESS_BATCH_SIZE_MSSP", "25"))
+PROCESS_BATCH_SIZE_MCQM: int = int(os.environ.get("MSSP_PROCESS_BATCH_SIZE_MCQM", "5"))
+PROCESS_BATCH_SIZE_EXPU: int = int(os.environ.get("MSSP_PROCESS_BATCH_SIZE_EXPU", "2"))
+
 # SNOWFLAKE OUTPUT CONFIGURATION
 RSA_KEY_PATH: str = os.path.expanduser(os.environ.get(
     "SNOWFLAKE_RSA_KEY_PATH",
@@ -238,6 +246,11 @@ class RuntimeConfig:
     MOTHERDUCK_DATABASE: str
     MOTHERDUCK_TOKEN: str
     TEMP_LOCATION: str
+    PROCESS_BATCH_SIZE_DEFAULT: int
+    PROCESS_BATCH_SIZE_CCLF: int
+    PROCESS_BATCH_SIZE_MSSP: int
+    PROCESS_BATCH_SIZE_MCQM: int
+    PROCESS_BATCH_SIZE_EXPU: int
 
     # Backend configs
     SNOWFLAKE: SnowflakeConfig

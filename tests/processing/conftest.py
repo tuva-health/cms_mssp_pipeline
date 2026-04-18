@@ -103,6 +103,11 @@ def test_config(raw_dir):
         FILE_STORE=str(raw_dir),
         OUTPUT_TYPE="DUCKDB",
         FULL_REFRESH=True,
+        PROCESS_BATCH_SIZE_DEFAULT=25,
+        PROCESS_BATCH_SIZE_CCLF=1,
+        PROCESS_BATCH_SIZE_MSSP=25,
+        PROCESS_BATCH_SIZE_MCQM=5,
+        PROCESS_BATCH_SIZE_EXPU=2,
     )
 
 
@@ -113,6 +118,11 @@ def incremental_config(raw_dir):
         FILE_STORE=str(raw_dir),
         OUTPUT_TYPE="DUCKDB",
         FULL_REFRESH=False,
+        PROCESS_BATCH_SIZE_DEFAULT=25,
+        PROCESS_BATCH_SIZE_CCLF=1,
+        PROCESS_BATCH_SIZE_MSSP=25,
+        PROCESS_BATCH_SIZE_MCQM=5,
+        PROCESS_BATCH_SIZE_EXPU=2,
     )
 
 

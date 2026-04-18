@@ -34,8 +34,8 @@ class FileProcessor(ABC):
                 if not source_info:
                     print(f"  No source files found for {table_name}. Skipping.")
                     continue
+                total_found = len(source_info)
                 if not self.config.FULL_REFRESH:
-                    total_found = len(source_info)
                     existing = set(
                         self.exporter.get_existing_file_paths(table_name, conn)
                     )
@@ -47,12 +47,44 @@ class FileProcessor(ABC):
                             f"  {total_found} source file(s) found, 0 new. Skipping."
                         )
                         continue
-                source_paths = [sp for _, sp in source_info]
-                query = self._build_query(file_def, source_paths)
-                self.exporter.export(query, table_name, conn)
+                batch_size = self._batch_size_for()
+                batches = list(_chunked(source_info, batch_size))
+                print(
+                    f"  {total_found} source file(s) found, {len(source_info)} to process in "
+                    f"{len(batches)} batch(es) of up to {batch_size}."
+                )
+                for batch_index, batch in enumerate(batches, start=1):
+                    print(
+                        f"  Batch {batch_index}/{len(batches)}: processing {len(batch)} source file(s)."
+                    )
+                    source_paths = [sp for _, sp in batch]
+                    query = self._build_query(file_def, source_paths)
+                    self._export_batch(query, table_name, conn, batch_index == 1)
                 print(f"✅ Successfully wrote {table_name}")
             except Exception as e:
                 print(f"❌ Error processing {table_name}: {e}")
+
+    def _batch_size_for(self) -> int:
+        batch_size = getattr(self.config, "PROCESS_BATCH_SIZE_DEFAULT", 25)
+        overrides = {
+            "CCLFProcessor": getattr(self.config, "PROCESS_BATCH_SIZE_CCLF", batch_size),
+            "MSSPProcessor": getattr(self.config, "PROCESS_BATCH_SIZE_MSSP", batch_size),
+            "MCQMProcessor": getattr(self.config, "PROCESS_BATCH_SIZE_MCQM", batch_size),
+            "EXPUProcessor": getattr(self.config, "PROCESS_BATCH_SIZE_EXPU", batch_size),
+        }
+        return max(1, int(overrides.get(self.__class__.__name__, batch_size)))
+
+    def _export_batch(self, query: str, table_name: str, conn, is_first_batch: bool) -> None:
+        original_full_refresh = getattr(self.exporter, "full_refresh", None)
+        if original_full_refresh is None:
+            self.exporter.export(query, table_name, conn)
+            return
+
+        self.exporter.full_refresh = bool(self.config.FULL_REFRESH and is_first_batch)
+        try:
+            self.exporter.export(query, table_name, conn)
+        finally:
+            self.exporter.full_refresh = original_full_refresh
 
     @abstractmethod
     def _get_file_definitions(self) -> List[Any]:
@@ -101,3 +133,7 @@ class FileProcessor(ABC):
             f"            regexp_extract(filename, '([^/]+)$', 1) AS FILE_NAME,\n"
             f"            {file_date_expr} AS FILE_DATE"
         )
+
+
+def _chunked(items: List[Tuple[str, str]], chunk_size: int) -> List[List[Tuple[str, str]]]:
+    return [items[i:i + chunk_size] for i in range(0, len(items), chunk_size)]

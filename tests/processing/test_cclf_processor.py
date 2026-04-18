@@ -102,3 +102,17 @@ def test_cclf_all_columns_varchar(test_session, test_config, raw_dir):
         assert data_type == "VARCHAR", (
             f"Expected VARCHAR for {col_name}, got {data_type}"
         )
+
+
+def test_cclf_full_refresh_preserves_all_batches(test_session, test_config, raw_dir):
+    test_config.PROCESS_BATCH_SIZE_CCLF = 1
+    make_cclf_file(raw_dir, ZC1_DEF, SAMPLE_ROWS[:1], bundle_suffix="_first")
+    make_cclf_file(raw_dir, ZC1_DEF, SAMPLE_ROWS[1:], bundle_suffix="_second")
+
+    _run_cclf(test_session, test_config)
+
+    rows = test_session.connection.execute(
+        "SELECT CUR_CLM_UNIQ_ID FROM raw_data.parta_claims_header ORDER BY 1"
+    ).fetchall()
+
+    assert rows == [("0000000000001",), ("0000000000002",)]
