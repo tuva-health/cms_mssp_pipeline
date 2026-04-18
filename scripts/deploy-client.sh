@@ -260,10 +260,11 @@ terraform_apply() {
     runtime_taskdef_arn="$(latest_taskdef_arn mssp-pipeline-runtime)"
     echo "Using latest runtime task definition ARN: $runtime_taskdef_arn"
     terraform -chdir="$tf_dir" apply \
+      -auto-approve \
       -var-file="$tfvars" \
       -var="runtime_task_definition_arn=$runtime_taskdef_arn"
   else
-    terraform -chdir="$tf_dir" apply -var-file="$tfvars"
+    terraform -chdir="$tf_dir" apply -auto-approve -var-file="$tfvars"
   fi
 }
 
