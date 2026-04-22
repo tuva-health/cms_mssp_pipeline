@@ -80,6 +80,10 @@ class DatabricksExporter:
             cursor.close()
             conn.close()
 
+    def get_missing_file_paths(self, table_name: str, candidate_file_paths: list[str], duckdb_connection) -> list[str]:
+        existing = set(self.get_existing_file_paths(table_name, duckdb_connection))
+        return [path for path in candidate_file_paths if path not in existing]
+
     def _write_staging(self, duckdb_connection, query, local_parquet, final_parquet):
         """Write staging Parquet — directly to cloud, or locally before DBFS upload."""
         if local_parquet is None:

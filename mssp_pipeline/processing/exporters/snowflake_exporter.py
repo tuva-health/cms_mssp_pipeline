@@ -71,6 +71,46 @@ class SnowflakeExporter:
             cursor.close()
             snowflake_conn.close()
 
+    def get_missing_file_paths(self, table_name: str, candidate_file_paths: list[str], duckdb_connection) -> list[str]:
+        table_name = normalize_identifier(table_name)
+        if not candidate_file_paths:
+            return []
+        if not self._snowflake_table_exists(table_name):
+            return list(candidate_file_paths)
+
+        full_table_name = self._table_ref(table_name)
+        private_key = self._load_rsa_key()
+        snowflake_conn = connector.connect(
+            user=self.sf_config.username,
+            account=self.sf_config.account,
+            schema=self.sf_config.schema,
+            database=self.sf_config.database,
+            warehouse=self.sf_config.warehouse,
+            private_key=private_key,
+            role=self.sf_config.role,
+        )
+        cursor = snowflake_conn.cursor()
+        try:
+            cursor.execute(f"""
+                WITH candidate_paths AS (
+                    {self._candidate_paths_sql(candidate_file_paths)}
+                )
+                SELECT c.FILE_PATH
+                FROM candidate_paths c
+                LEFT JOIN {full_table_name} t
+                  ON t.FILE_PATH = c.FILE_PATH
+                WHERE t.FILE_PATH IS NULL
+            """)
+            missing = {row[0] for row in cursor.fetchall()}
+            return [path for path in candidate_file_paths if path in missing]
+        except connector.errors.ProgrammingError as e:
+            if "does not exist" in str(e).lower():
+                return list(candidate_file_paths)
+            raise
+        finally:
+            cursor.close()
+            snowflake_conn.close()
+
     def _snowflake_table_exists(self, table_name: str) -> bool:
         """Returns True if the target table already exists in Snowflake."""
         private_key = self._load_rsa_key()
@@ -234,6 +274,16 @@ class SnowflakeExporter:
             table_name,
             field_name="table reference",
         )
+
+    def _candidate_paths_sql(self, candidate_file_paths: list[str]) -> str:
+        selects = []
+        for idx, path in enumerate(candidate_file_paths):
+            literal = string_literal(path)
+            if idx == 0:
+                selects.append(f"SELECT {literal} AS FILE_PATH")
+            else:
+                selects.append(f"UNION ALL SELECT {literal}")
+        return "\n                    ".join(selects)
 
     def _stage_name(self, table_name: str) -> str:
         return qualified_identifier(

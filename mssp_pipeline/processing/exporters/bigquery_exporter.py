@@ -69,6 +69,10 @@ class BigQueryExporter:
         except NotFound:
             return []
 
+    def get_missing_file_paths(self, table_name: str, candidate_file_paths: list[str], duckdb_connection) -> list[str]:
+        existing = set(self.get_existing_file_paths(table_name, duckdb_connection))
+        return [path for path in candidate_file_paths if path not in existing]
+
     def _connect(self):
         if self.bq_config.credentials_path:
             return bigquery.Client.from_service_account_json(

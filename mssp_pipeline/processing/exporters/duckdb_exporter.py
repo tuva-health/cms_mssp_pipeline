@@ -45,3 +45,7 @@ class DuckDBExporter:
                 f"SELECT DISTINCT FILE_PATH FROM {qualified_identifier(self.schema, table_name, field_name='table reference')}"
             ).fetchall()
         ]
+
+    def get_missing_file_paths(self, table_name: str, candidate_file_paths: list[str], duckdb_connection) -> list[str]:
+        existing = set(self.get_existing_file_paths(table_name, duckdb_connection))
+        return [path for path in candidate_file_paths if path not in existing]

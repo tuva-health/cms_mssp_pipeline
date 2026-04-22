@@ -51,15 +51,16 @@ class Exporter(Protocol):
         """
         ...
 
-    def get_existing_file_paths(self, table_name: str, duckdb_connection) -> list:
+    def get_missing_file_paths(self, table_name: str, candidate_file_paths: list[str], duckdb_connection) -> list[str]:
         """
-        Return the list of FILE_PATH values already persisted in the destination.
+        Return only the candidate FILE_PATH values not yet persisted in the destination.
 
-        Returns an empty list if the table/file does not yet exist.
-        Called by FileProcessor.run() to determine which source files are new.
+        Called by FileProcessor.run() batch-by-batch so exporters can perform
+        bounded existence checks against the destination backend.
 
         Args:
             table_name:        Logical table name.
+            candidate_file_paths: FILE_PATH values from the current processor batch.
             duckdb_connection: An active duckdb.DuckDBPyConnection.
         """
         ...

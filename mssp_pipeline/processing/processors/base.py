@@ -35,31 +35,39 @@ class FileProcessor(ABC):
                     print(f"  No source files found for {table_name}. Skipping.")
                     continue
                 total_found = len(source_info)
-                if not self.config.FULL_REFRESH:
-                    existing = set(
-                        self.exporter.get_existing_file_paths(table_name, conn)
-                    )
-                    source_info = [
-                        (fp, sp) for fp, sp in source_info if fp not in existing
-                    ]
-                    if not source_info:
-                        print(
-                            f"  {total_found} source file(s) found, 0 new. Skipping."
-                        )
-                        continue
                 batch_size = self._batch_size_for()
                 batches = list(_chunked(source_info, batch_size))
                 print(
-                    f"  {total_found} source file(s) found, {len(source_info)} to process in "
+                    f"  {total_found} source file(s) found, processing in "
                     f"{len(batches)} batch(es) of up to {batch_size}."
                 )
+                processed_files = 0
                 for batch_index, batch in enumerate(batches, start=1):
+                    batch_to_process = batch
+                    if not self.config.FULL_REFRESH:
+                        candidate_paths = [fp for fp, _ in batch]
+                        missing_paths = set(
+                            self.exporter.get_missing_file_paths(table_name, candidate_paths, conn)
+                        )
+                        batch_to_process = [
+                            (fp, sp) for fp, sp in batch if fp in missing_paths
+                        ]
+                        if not batch_to_process:
+                            print(
+                                f"  Batch {batch_index}/{len(batches)}: {len(batch)} source file(s), 0 new. Skipping."
+                            )
+                            continue
+
                     print(
-                        f"  Batch {batch_index}/{len(batches)}: processing {len(batch)} source file(s)."
+                        f"  Batch {batch_index}/{len(batches)}: processing {len(batch_to_process)} of {len(batch)} source file(s)."
                     )
-                    source_paths = [sp for _, sp in batch]
+                    source_paths = [sp for _, sp in batch_to_process]
                     query = self._build_query(file_def, source_paths)
                     self._export_batch(query, table_name, conn, batch_index == 1)
+                    processed_files += len(batch_to_process)
+                if not self.config.FULL_REFRESH and processed_files == 0:
+                    print(f"  {total_found} source file(s) found, 0 new. Skipping.")
+                    continue
                 print(f"✅ Successfully wrote {table_name}")
             except Exception as e:
                 print(f"❌ Error processing {table_name}: {e}")
