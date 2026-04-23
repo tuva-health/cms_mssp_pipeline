@@ -57,10 +57,18 @@ scripts/deploy-and-smoke-client.sh <client> <tag>
 scripts/deploy-and-smoke-client.sh <client> <tag> -- mssp-validate --target process --strict
 ```
 
+One-command process-only ECS run:
+
+```bash
+scripts/run-client-process-task.sh <client> --database <db>
+scripts/run-client-process-task.sh <client> --database <db> --schema RAW_DATA
+```
+
 Conventions:
 - `scripts/build-and-push-image.sh` derives Docker `PIP_EXTRAS` from `MSSP_OUTPUT_TYPE` (e.g. `processing,snowflake` for Snowflake).
 - `scripts/deploy-client.sh activate` automatically resolves the latest active `mssp-pipeline-runtime` task definition ARN.
 - `scripts/deploy-and-smoke-client.sh` wraps build/push + render/register/activate + one-off `aws ecs run-task` smoke execution against the latest runtime revision.
+- `scripts/run-client-process-task.sh` runs a one-off ECS task with command override `mssp-process` and destination overrides such as `SNOWFLAKE_DATABASE` / `SNOWFLAKE_SCHEMA`.
 - Client `env.sh` files should use overridable defaults such as `export IMAGE_TAG="${IMAGE_TAG:-latest}"` so shell overrides work.
 - When taskdef wiring and container behavior change together, use a fresh image tag, then render/register/activate before smoke testing.
 - For manual smoke runs, use a one-off `aws ecs run-task` against the latest runtime revision and tail `/ecs/mssp-pipeline` logs.

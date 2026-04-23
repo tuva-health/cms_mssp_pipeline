@@ -16,6 +16,26 @@ variable "enable_schedule" {
   default = true
 }
 
+variable "process_schedule_expression" {
+  type    = string
+  default = ""
+}
+
+variable "enable_process_schedule" {
+  type    = bool
+  default = false
+}
+
+variable "process_database" {
+  type    = string
+  default = ""
+}
+
+variable "process_schema" {
+  type    = string
+  default = "RAW_DATA"
+}
+
 variable "foundation_state_backend" {
   type    = string
   default = "local"

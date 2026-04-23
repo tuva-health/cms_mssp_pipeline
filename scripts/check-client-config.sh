@@ -218,6 +218,22 @@ check_activate_remote_state_keys_if_needed() {
   fi
 }
 
+check_process_schedule_keys_if_needed() {
+  local file="$CLIENT_DIR/activate.tfvars"
+  local enabled process_db process_expr
+  enabled="$(tfvar_string_value "$file" enable_process_schedule)"
+  if [[ "$enabled" == "true" ]]; then
+    check_tfvars_keys "$file" process_schedule_expression process_database process_schema
+    check_tfvars_no_placeholders "$file" process_schedule_expression process_database process_schema
+    process_expr="$(tfvar_string_value "$file" process_schedule_expression)"
+    process_db="$(tfvar_string_value "$file" process_database)"
+    if [[ -z "$process_expr" || -z "$process_db" ]]; then
+      echo "[error] Process schedule is enabled but process_schedule_expression/process_database are blank in $file" >&2
+      exit 1
+    fi
+  fi
+}
+
 require_cmd terraform
 
 case "$MODE" in
@@ -233,6 +249,7 @@ case "$MODE" in
     check_tfvars_keys "$CLIENT_DIR/activate.tfvars" region schedule_expression
     check_tfvars_no_placeholders "$CLIENT_DIR/activate.tfvars" region schedule_expression
     check_activate_remote_state_keys_if_needed
+    check_process_schedule_keys_if_needed
     ;;
   render-taskdefs)
     check_aws_auth
@@ -252,6 +269,7 @@ case "$MODE" in
     check_tfvars_keys "$CLIENT_DIR/activate.tfvars" region schedule_expression
     check_tfvars_no_placeholders "$CLIENT_DIR/activate.tfvars" region schedule_expression
     check_activate_remote_state_keys_if_needed
+    check_process_schedule_keys_if_needed
     check_render_env
     ;;
 esac

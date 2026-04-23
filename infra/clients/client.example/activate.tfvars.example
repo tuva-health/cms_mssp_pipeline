@@ -2,6 +2,10 @@ region              = "us-east-1"
 project_name        = "mssp-pipeline"
 schedule_expression = "cron(0 6 * * ? *)"
 enable_schedule     = true
+process_schedule_expression = "cron(30 6 * * ? *)"
+enable_process_schedule     = false
+process_database            = ""
+process_schema              = "RAW_DATA"
 
 # Read network + ECS placement defaults from foundation remote state
 # - Use "local" if activate runs from same repo/workdir as foundation

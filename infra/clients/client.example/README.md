@@ -17,6 +17,7 @@ Then fill in values and run:
 scripts/check-client-config.sh acme --for all
 scripts/deploy-client.sh acme all
 scripts/deploy-and-smoke-client.sh acme 2026-04-17 -- mssp-validate --target process --strict
+scripts/run-client-process-task.sh acme --database MY_PROD_DB --schema RAW_DATA
 ```
 
 ## Files

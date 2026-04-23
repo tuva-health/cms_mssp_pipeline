@@ -100,6 +100,14 @@ resource "aws_cloudwatch_event_rule" "mssp_schedule" {
   state               = var.enable_schedule ? "ENABLED" : "DISABLED"
 }
 
+resource "aws_cloudwatch_event_rule" "process_schedule" {
+  count               = var.enable_process_schedule ? 1 : 0
+  name                = "${var.project_name}-process-schedule"
+  description         = "Runs mssp process-only ECS task on schedule"
+  schedule_expression = var.process_schedule_expression
+  state               = var.enable_process_schedule ? "ENABLED" : "DISABLED"
+}
+
 resource "aws_cloudwatch_event_target" "ecs" {
   depends_on = [null_resource.activation_gates]
 
@@ -107,6 +115,49 @@ resource "aws_cloudwatch_event_target" "ecs" {
   target_id = "mssp-runtime"
   arn       = local.effective_ecs_cluster_arn
   role_arn  = local.effective_events_role_arn
+
+  ecs_target {
+    task_definition_arn = var.runtime_task_definition_arn
+    task_count          = 1
+    launch_type         = "FARGATE"
+    network_configuration {
+      subnets          = local.effective_ecs_subnet_ids
+      security_groups  = local.effective_ecs_sg_ids
+      assign_public_ip = false
+    }
+  }
+}
+
+resource "aws_cloudwatch_event_target" "process_ecs" {
+  count      = var.enable_process_schedule ? 1 : 0
+  depends_on = [null_resource.activation_gates]
+
+  rule      = aws_cloudwatch_event_rule.process_schedule[0].name
+  target_id = "mssp-process-runtime"
+  arn       = local.effective_ecs_cluster_arn
+  role_arn  = local.effective_events_role_arn
+  input = jsonencode({
+    containerOverrides = [
+      {
+        name    = "mssp-runtime"
+        command = ["mssp-process"]
+        environment = [
+          {
+            name  = "SNOWFLAKE_DATABASE"
+            value = var.process_database
+          },
+          {
+            name  = "SNOWFLAKE_SCHEMA"
+            value = var.process_schema
+          },
+          {
+            name  = "MSSP_FULL_REFRESH"
+            value = "false"
+          }
+        ]
+      }
+    ]
+  })
 
   ecs_target {
     task_definition_arn = var.runtime_task_definition_arn
