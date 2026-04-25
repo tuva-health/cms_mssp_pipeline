@@ -2,6 +2,7 @@ from typing import List, Tuple
 
 from .base import FileProcessor
 from ..defs.cclf_file_defs import CCLFFileDef, CCLF_FILE_DEFS
+from ..sql import sql_string_literal
 
 
 class CCLFProcessor(FileProcessor):
@@ -31,7 +32,7 @@ class CCLFProcessor(FileProcessor):
         pattern = self._match_pattern(file_def)
         try:
             rows = self.session.connection.execute(
-                f"SELECT * FROM glob('{pattern}')"
+                f"SELECT * FROM glob({sql_string_literal(pattern)})"
             ).fetchall()
         except Exception:
             return []
@@ -71,5 +72,4 @@ class CCLFProcessor(FileProcessor):
 
 def _sql_path_list(paths: List[str]) -> str:
     """Format a list of file paths as a DuckDB list literal: ['path1', 'path2']."""
-    escaped = [p.replace("'", "''") for p in paths]
-    return "[" + ", ".join(f"'{p}'" for p in escaped) + "]"
+    return "[" + ", ".join(sql_string_literal(p) for p in paths) + "]"

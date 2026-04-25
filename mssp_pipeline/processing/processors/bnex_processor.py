@@ -2,6 +2,7 @@ from typing import List, Tuple
 
 from .base import FileProcessor
 from ..defs.bnex_file_defs import BNEXFileDef, BNEX_FILE_DEFS
+from ..sql import sql_string_literal
 
 # Regex to extract the 6-digit YYMMDD date component from BNEX filenames.
 # Example: P.C1234.BNEX.R25.D260212.T1420360.xml → captures "260212"
@@ -43,7 +44,7 @@ class BNEXProcessor(FileProcessor):
         pattern = self._glob_pattern(file_def)
         try:
             rows = self.session.connection.execute(
-                f"SELECT * FROM glob('{pattern}')"
+                f"SELECT * FROM glob({sql_string_literal(pattern)})"
             ).fetchall()
         except Exception:
             return []
@@ -90,5 +91,4 @@ class BNEXProcessor(FileProcessor):
 
 def _sql_path_list(paths: List[str]) -> str:
     """Format a list of file paths as a DuckDB list literal: ['path1', 'path2']."""
-    escaped = [p.replace("'", "''") for p in paths]
-    return "[" + ", ".join(f"'{p}'" for p in escaped) + "]"
+    return "[" + ", ".join(sql_string_literal(p) for p in paths) + "]"
