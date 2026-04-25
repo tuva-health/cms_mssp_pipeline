@@ -140,3 +140,4 @@ class BigQueryExporter:
             print(f"✅ Successfully {action_done} {table_ref}")
         except Exception as e:
             print(f"  Error loading {table_name} to BigQuery: {e}")
+            raise

@@ -166,6 +166,7 @@ class DatabricksExporter:
             print(f"✅ Successfully loaded {table_ref}")
         except Exception as e:
             print(f"  Error loading {table_name} to Databricks: {e}")
+            raise
         finally:
             cursor.close()
             conn.close()
@@ -185,6 +186,7 @@ class DatabricksExporter:
             print(f"✅ Successfully appended to {table_ref}")
         except Exception as e:
             print(f"  Error appending {table_name} to Databricks: {e}")
+            raise
         finally:
             cursor.close()
             conn.close()

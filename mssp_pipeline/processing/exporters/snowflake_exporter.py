@@ -204,6 +204,7 @@ class SnowflakeExporter:
         except Exception as e:
             print(f"Error appending {table_name} to Snowflake: {e}")
             snowflake_conn.rollback()
+            raise
         finally:
             cursor.close()
             snowflake_conn.close()
@@ -267,6 +268,7 @@ class SnowflakeExporter:
         except Exception as e:
             print(f"Error loading {table_name} to Snowflake: {e}")
             snowflake_conn.rollback()
+            raise
         finally:
             cursor.close()
             snowflake_conn.close()

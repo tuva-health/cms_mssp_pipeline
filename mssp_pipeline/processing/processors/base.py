@@ -26,6 +26,7 @@ class FileProcessor(ABC):
 
     def run(self) -> None:
         conn = self.session.connection
+        failures: List[Tuple[str, BaseException]] = []
         for file_def in self._get_file_definitions():
             table_name = self._get_table_name(file_def)
             try:
@@ -70,7 +71,17 @@ class FileProcessor(ABC):
                     continue
                 print(f"✅ Successfully wrote {table_name}")
             except Exception as e:
+                # Continue processing remaining tables, but record the failure so
+                # the orchestrator marks the run as failed instead of silently
+                # reporting success.
                 print(f"❌ Error processing {table_name}: {e}")
+                failures.append((table_name, e))
+
+        if failures:
+            summary = ", ".join(f"{name}: {err}" for name, err in failures)
+            raise RuntimeError(
+                f"{self.__class__.__name__} failed for {len(failures)} table(s): {summary}"
+            ) from failures[0][1]
 
     def _batch_size_for(self) -> int:
         batch_size = getattr(self.config, "PROCESS_BATCH_SIZE_DEFAULT", 25)

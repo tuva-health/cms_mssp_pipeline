@@ -130,3 +130,4 @@ class FabricExporter:
             print(f"✅ Successfully {action_done} {table_path}")
         except Exception as e:
             print(f"  Error writing {table_name} to Fabric Lakehouse: {e}")
+            raise

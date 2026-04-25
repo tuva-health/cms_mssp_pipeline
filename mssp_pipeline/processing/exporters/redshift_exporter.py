@@ -146,6 +146,7 @@ class RedshiftExporter:
         except Exception as e:
             print(f"  Error creating table {table_name}: {e}")
             conn.rollback()
+            raise
         finally:
             cursor.close()
             conn.close()
@@ -168,6 +169,7 @@ class RedshiftExporter:
         except Exception as e:
             print(f"  Error loading {table_name} to Redshift: {e}")
             conn.rollback()
+            raise
         finally:
             cursor.close()
             conn.close()
