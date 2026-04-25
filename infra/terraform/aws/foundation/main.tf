@@ -260,6 +260,14 @@ data "aws_iam_policy_document" "ecs_task_execution_secrets" {
       "kms:Decrypt",
     ]
     resources = ["*"]
+    # Restrict decrypt to keys used by Secrets Manager in this region. Without
+    # this condition any KMS key in the account would be decryptable through
+    # the execution role.
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["secretsmanager.${var.region}.amazonaws.com"]
+    }
   }
 }
 
@@ -368,7 +376,16 @@ data "aws_iam_policy_document" "events_invoke_ecs" {
     actions = [
       "ecs:RunTask",
     ]
-    resources = ["*"]
+    # Limit to this project's task-definition family. Without scoping, the
+    # EventBridge role could RunTask against any task-definition in the account.
+    resources = [
+      "arn:aws:ecs:${var.region}:${data.aws_caller_identity.current.account_id}:task-definition/${var.project_name}-*",
+    ]
+    condition {
+      test     = "ArnEquals"
+      variable = "ecs:cluster"
+      values   = [aws_ecs_cluster.this.arn]
+    }
   }
 
   statement {
