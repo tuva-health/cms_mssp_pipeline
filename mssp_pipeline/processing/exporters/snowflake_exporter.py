@@ -47,7 +47,6 @@ class SnowflakeExporter:
         """Return distinct FILE_PATH values from the existing Snowflake table, or [] if not found."""
         table_name = normalize_identifier(table_name)
         full_table_name = self._table_ref(table_name)
-        file_path_column = self._file_path_column()
         private_key = self._load_rsa_key()
         snowflake_conn = connector.connect(
             user=self.sf_config.username,
@@ -60,6 +59,7 @@ class SnowflakeExporter:
         )
         cursor = snowflake_conn.cursor()
         try:
+            file_path_column = self._file_path_column(cursor, table_name)
             cursor.execute(f"SELECT DISTINCT {file_path_column} FROM {full_table_name}")
             paths = [row[0] for row in cursor.fetchall()]
             print(f"  Found {len(paths)} existing FILE_PATH(s) in Snowflake for {table_name}")
@@ -80,7 +80,6 @@ class SnowflakeExporter:
             return list(candidate_file_paths)
 
         full_table_name = self._table_ref(table_name)
-        file_path_column = self._file_path_column()
         private_key = self._load_rsa_key()
         snowflake_conn = connector.connect(
             user=self.sf_config.username,
@@ -93,9 +92,10 @@ class SnowflakeExporter:
         )
         cursor = snowflake_conn.cursor()
         try:
+            file_path_column = self._file_path_column(cursor, table_name)
             cursor.execute(f"""
                 WITH candidate_paths AS (
-                    {self._candidate_paths_sql(candidate_file_paths)}
+                    {self._candidate_paths_sql(candidate_file_paths, file_path_column)}
                 )
                 SELECT c.{file_path_column}
                 FROM candidate_paths c
@@ -140,7 +140,6 @@ class SnowflakeExporter:
     def _fetch_existing_file_paths(self, table_name: str) -> list:
         """Fetches all distinct FILE_PATH values from the existing Snowflake table."""
         full_table_name = self._table_ref(table_name)
-        file_path_column = self._file_path_column()
         private_key = self._load_rsa_key()
         snowflake_conn = connector.connect(
             user=self.sf_config.username,
@@ -153,6 +152,7 @@ class SnowflakeExporter:
         )
         cursor = snowflake_conn.cursor()
         try:
+            file_path_column = self._file_path_column(cursor, table_name)
             cursor.execute(f"SELECT DISTINCT {file_path_column} FROM {full_table_name}")
             return [row[0] for row in cursor.fetchall()]
         finally:
@@ -278,9 +278,8 @@ class SnowflakeExporter:
             field_name="table reference",
         )
 
-    def _candidate_paths_sql(self, candidate_file_paths: list[str]) -> str:
+    def _candidate_paths_sql(self, candidate_file_paths: list[str], file_path_column: str) -> str:
         selects = []
-        file_path_column = self._file_path_column()
         for idx, path in enumerate(candidate_file_paths):
             literal = string_literal(path)
             if idx == 0:
@@ -289,8 +288,22 @@ class SnowflakeExporter:
                 selects.append(f"UNION ALL SELECT {literal}")
         return "\n                    ".join(selects)
 
-    def _file_path_column(self) -> str:
-        return '"file_path"'
+    def _file_path_column(self, cursor, table_name: str) -> str:
+        cursor.execute(f"""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = {string_literal(normalize_identifier(self.sf_config.schema).upper())}
+              AND table_name = {string_literal(table_name.upper())}
+              AND UPPER(column_name) = 'FILE_PATH'
+            LIMIT 1
+        """)
+        row = cursor.fetchone()
+        if not row or not row[0]:
+            raise ValueError(f"FILE_PATH column not found in Snowflake table: {self._table_ref(table_name)}")
+        return self._quoted_identifier(row[0])
+
+    def _quoted_identifier(self, name: str) -> str:
+        return '"' + name.replace('"', '""') + '"'
 
     def _stage_name(self, table_name: str) -> str:
         return qualified_identifier(

@@ -33,6 +33,7 @@ def test_get_missing_file_paths_returns_all_when_table_missing():
 def test_get_missing_file_paths_returns_only_missing_candidates():
     exporter = _make_exporter()
     fake_cursor = MagicMock()
+    fake_cursor.fetchone.return_value = ("file_path",)
     fake_cursor.fetchall.return_value = [("b",)]
     fake_conn = MagicMock()
     fake_conn.cursor.return_value = fake_cursor
@@ -55,6 +56,7 @@ def test_get_missing_file_paths_returns_only_missing_candidates():
 def test_get_missing_file_paths_escapes_quotes():
     exporter = _make_exporter()
     fake_cursor = MagicMock()
+    fake_cursor.fetchone.return_value = ("file_path",)
     fake_cursor.fetchall.return_value = []
     fake_conn = MagicMock()
     fake_conn.cursor.return_value = fake_cursor
@@ -66,3 +68,22 @@ def test_get_missing_file_paths_escapes_quotes():
 
     executed_sql = fake_cursor.execute.call_args.args[0]
     assert "SELECT 'a''b' AS \"file_path\"" in executed_sql
+
+
+def test_get_missing_file_paths_supports_uppercase_file_path_columns():
+    exporter = _make_exporter()
+    fake_cursor = MagicMock()
+    fake_cursor.fetchone.return_value = ("FILE_PATH",)
+    fake_cursor.fetchall.return_value = [("b",)]
+    fake_conn = MagicMock()
+    fake_conn.cursor.return_value = fake_cursor
+
+    with patch.object(exporter, "_snowflake_table_exists", return_value=True), \
+         patch.object(exporter, "_load_rsa_key", return_value=b"key"), \
+         patch("mssp_pipeline.processing.exporters.snowflake_exporter.connector.connect", return_value=fake_conn):
+        missing = exporter.get_missing_file_paths("claims", ["a", "b"], None)
+
+    assert missing == ["b"]
+    executed_sql = fake_cursor.execute.call_args.args[0]
+    assert 'SELECT c."FILE_PATH"' in executed_sql
+    assert 't."FILE_PATH" = c."FILE_PATH"' in executed_sql
