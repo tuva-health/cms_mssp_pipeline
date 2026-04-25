@@ -46,9 +46,10 @@ def test_get_missing_file_paths_returns_only_missing_candidates():
     executed_sql = fake_cursor.execute.call_args.args[0]
     assert "WITH candidate_paths AS" in executed_sql
     assert "LEFT JOIN raw_data.claims" in executed_sql
-    assert "SELECT 'a' AS FILE_PATH" in executed_sql
+    assert "SELECT 'a' AS \"file_path\"" in executed_sql
     assert "UNION ALL SELECT 'b'" in executed_sql
     assert "UNION ALL SELECT 'c'" in executed_sql
+    assert 't."file_path" = c."file_path"' in executed_sql
 
 
 def test_get_missing_file_paths_escapes_quotes():
@@ -64,4 +65,4 @@ def test_get_missing_file_paths_escapes_quotes():
         exporter.get_missing_file_paths("claims", ["a'b"], None)
 
     executed_sql = fake_cursor.execute.call_args.args[0]
-    assert "SELECT 'a''b' AS FILE_PATH" in executed_sql
+    assert "SELECT 'a''b' AS \"file_path\"" in executed_sql

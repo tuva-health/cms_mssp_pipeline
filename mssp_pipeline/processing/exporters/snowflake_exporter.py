@@ -47,6 +47,7 @@ class SnowflakeExporter:
         """Return distinct FILE_PATH values from the existing Snowflake table, or [] if not found."""
         table_name = normalize_identifier(table_name)
         full_table_name = self._table_ref(table_name)
+        file_path_column = self._file_path_column()
         private_key = self._load_rsa_key()
         snowflake_conn = connector.connect(
             user=self.sf_config.username,
@@ -59,7 +60,7 @@ class SnowflakeExporter:
         )
         cursor = snowflake_conn.cursor()
         try:
-            cursor.execute(f"SELECT DISTINCT FILE_PATH FROM {full_table_name}")
+            cursor.execute(f"SELECT DISTINCT {file_path_column} FROM {full_table_name}")
             paths = [row[0] for row in cursor.fetchall()]
             print(f"  Found {len(paths)} existing FILE_PATH(s) in Snowflake for {table_name}")
             return paths
@@ -79,6 +80,7 @@ class SnowflakeExporter:
             return list(candidate_file_paths)
 
         full_table_name = self._table_ref(table_name)
+        file_path_column = self._file_path_column()
         private_key = self._load_rsa_key()
         snowflake_conn = connector.connect(
             user=self.sf_config.username,
@@ -95,11 +97,11 @@ class SnowflakeExporter:
                 WITH candidate_paths AS (
                     {self._candidate_paths_sql(candidate_file_paths)}
                 )
-                SELECT c.FILE_PATH
+                SELECT c.{file_path_column}
                 FROM candidate_paths c
                 LEFT JOIN {full_table_name} t
-                  ON t.FILE_PATH = c.FILE_PATH
-                WHERE t.FILE_PATH IS NULL
+                  ON t.{file_path_column} = c.{file_path_column}
+                WHERE t.{file_path_column} IS NULL
             """)
             missing = {row[0] for row in cursor.fetchall()}
             return [path for path in candidate_file_paths if path in missing]
@@ -138,6 +140,7 @@ class SnowflakeExporter:
     def _fetch_existing_file_paths(self, table_name: str) -> list:
         """Fetches all distinct FILE_PATH values from the existing Snowflake table."""
         full_table_name = self._table_ref(table_name)
+        file_path_column = self._file_path_column()
         private_key = self._load_rsa_key()
         snowflake_conn = connector.connect(
             user=self.sf_config.username,
@@ -150,7 +153,7 @@ class SnowflakeExporter:
         )
         cursor = snowflake_conn.cursor()
         try:
-            cursor.execute(f"SELECT DISTINCT FILE_PATH FROM {full_table_name}")
+            cursor.execute(f"SELECT DISTINCT {file_path_column} FROM {full_table_name}")
             return [row[0] for row in cursor.fetchall()]
         finally:
             cursor.close()
@@ -277,13 +280,17 @@ class SnowflakeExporter:
 
     def _candidate_paths_sql(self, candidate_file_paths: list[str]) -> str:
         selects = []
+        file_path_column = self._file_path_column()
         for idx, path in enumerate(candidate_file_paths):
             literal = string_literal(path)
             if idx == 0:
-                selects.append(f"SELECT {literal} AS FILE_PATH")
+                selects.append(f"SELECT {literal} AS {file_path_column}")
             else:
                 selects.append(f"UNION ALL SELECT {literal}")
         return "\n                    ".join(selects)
+
+    def _file_path_column(self) -> str:
+        return '"file_path"'
 
     def _stage_name(self, table_name: str) -> str:
         return qualified_identifier(
