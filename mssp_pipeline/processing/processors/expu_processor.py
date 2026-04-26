@@ -2,6 +2,8 @@ import re
 from datetime import date, timedelta
 from typing import List, Optional, Tuple
 
+import duckdb
+
 from .base import FileProcessor
 from ..defs.expu_file_defs import EXPUFileDef, EXPU_FILE_DEFS
 from ..sql import sql_string_literal, validate_identifier
@@ -57,7 +59,8 @@ class EXPUProcessor(FileProcessor):
             rows = self.session.connection.execute(
                 f"SELECT * FROM glob({sql_string_literal(pattern)})"
             ).fetchall()
-        except Exception:
+        except duckdb.IOException as e:
+            print(f"  Warning: could not list EXPU source files (pattern={pattern}): {e}")
             return []
         return sorted(r[0] for r in rows)
 

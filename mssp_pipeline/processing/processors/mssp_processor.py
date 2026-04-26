@@ -1,5 +1,7 @@
 from typing import List, Tuple
 
+import duckdb
+
 from .base import FileProcessor
 from ..defs.mssp_file_defs import MSSPFileDef, MSSP_FILE_DEFS
 from ..sql import sql_string_literal, validate_identifier
@@ -39,7 +41,8 @@ class MSSPProcessor(FileProcessor):
             rows = self.session.connection.execute(
                 f"SELECT * FROM glob({sql_string_literal(pattern)})"
             ).fetchall()
-        except Exception:
+        except duckdb.IOException as e:
+            print(f"  Warning: could not list MSSP source files (pattern={pattern}): {e}")
             return []
         # source_path is the zipfs reference (zip://...!...).
         # FILE_PATH strips 'zip://' and removes the '!' separator, matching

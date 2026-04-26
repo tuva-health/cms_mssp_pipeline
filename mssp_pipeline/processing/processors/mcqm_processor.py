@@ -2,6 +2,8 @@ import re
 from datetime import date, timedelta
 from typing import List, Tuple
 
+import duckdb
+
 from .base import FileProcessor
 from ..defs.mcqm_file_defs import MCQMFileDef, MCQM_FILE_DEFS
 from ..sql import sql_string_literal
@@ -50,7 +52,8 @@ class MCQMProcessor(FileProcessor):
             rows = self.session.connection.execute(
                 f"SELECT * FROM glob({sql_string_literal(pattern)})"
             ).fetchall()
-        except Exception:
+        except duckdb.IOException as e:
+            print(f"  Warning: could not list MCQM zip paths (pattern={pattern}): {e}")
             return []
         return sorted(r[0] for r in rows)
 
@@ -87,7 +90,8 @@ class MCQMProcessor(FileProcessor):
                 rows = self.session.connection.execute(
                     f"SELECT * FROM glob({sql_string_literal(f'zip://{zip_path}!*.xlsx')})"
                 ).fetchall()
-            except Exception:
+            except duckdb.IOException as e:
+                print(f"  Warning: could not list MCQM zip contents ({zip_path}): {e}")
                 continue
             for row in rows:
                 zip_ref = row[0]  # e.g. 'zip://s3://bucket/path/file!internal.xlsx'
