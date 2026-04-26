@@ -6,6 +6,7 @@ import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 
 _RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -13,6 +14,30 @@ _RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def redact_url(value: str | None) -> str | None:
+    """Strip query strings and userinfo from a URL before persisting it.
+
+    Run manifests are written to disk and shipped with the project; remote
+    store URIs occasionally include credentials (Azure SAS tokens in the query
+    string, basic-auth userinfo in the netloc). Path-only URIs and non-URL
+    strings pass through unchanged.
+    """
+    if not value or "://" not in value:
+        return value
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return value
+    netloc = parts.netloc
+    if "@" in netloc:
+        host = netloc.rsplit("@", 1)[1]
+        netloc = f"***@{host}"
+    if not parts.query and netloc == parts.netloc:
+        return value
+    redacted_query = "<redacted>" if parts.query else ""
+    return urlunsplit((parts.scheme, netloc, parts.path, redacted_query, parts.fragment))
 
 
 def validate_run_id(run_id: str) -> str:

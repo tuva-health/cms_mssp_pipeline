@@ -65,7 +65,7 @@ def run(
         processing_config: Config object for the processing step. If None, loads
                            from mssp_pipeline.config.
     """
-    from mssp_pipeline.run_manifest import RunManifest
+    from mssp_pipeline.run_manifest import RunManifest, redact_url
 
     started = time.perf_counter()
     download_dir = Path(download_dir)
@@ -84,7 +84,7 @@ def run(
         start_year=start_year,
         download_dir=str(download_dir),
         download_mode=download_mode,
-        remote_store=remote_store,
+        remote_store=redact_url(remote_store),
         cleanup_download_dir=cleanup_download_dir,
         resume_run_id=resume_run_id,
     )
