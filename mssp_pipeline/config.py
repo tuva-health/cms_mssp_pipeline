@@ -97,7 +97,7 @@ TEMP_LOCATION: str = os.path.expanduser(os.environ.get("MSSP_TEMP_LOCATION", "./
 # Processing batch sizing. These limits cap how many source files a processor
 # includes in a single DuckDB query/export batch to reduce peak memory usage.
 PROCESS_BATCH_SIZE_DEFAULT: int = int(os.environ.get("MSSP_PROCESS_BATCH_SIZE_DEFAULT", "25"))
-PROCESS_BATCH_SIZE_CCLF: int = int(os.environ.get("MSSP_PROCESS_BATCH_SIZE_CCLF", "1"))
+PROCESS_BATCH_SIZE_CCLF: int = int(os.environ.get("MSSP_PROCESS_BATCH_SIZE_CCLF", "3"))
 PROCESS_BATCH_SIZE_MSSP: int = int(os.environ.get("MSSP_PROCESS_BATCH_SIZE_MSSP", "25"))
 PROCESS_BATCH_SIZE_MCQM: int = int(os.environ.get("MSSP_PROCESS_BATCH_SIZE_MCQM", "5"))
 PROCESS_BATCH_SIZE_EXPU: int = int(os.environ.get("MSSP_PROCESS_BATCH_SIZE_EXPU", "2"))
