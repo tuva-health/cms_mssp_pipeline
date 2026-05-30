@@ -23,6 +23,7 @@ uv.lock
 
 # Environment
 .env
+.env.tier1-private
 .envrc.local
 
 # Editor

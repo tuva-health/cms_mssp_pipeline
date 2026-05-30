@@ -193,6 +193,35 @@ MSSP_DOWNLOAD_MODE=incremental
 MSSP_S3_BUCKET=
 ```
 
+### Tier 1 Private Claims S3 Run
+
+For the private claims S3 workflow, keep the bucket/prefix and AWS auth in a local
+gitignored file:
+
+```bash
+cp .env.tier1-private.example .env.tier1-private
+```
+
+Then edit `.env.tier1-private` with the private S3 file store and AWS profile:
+
+```dotenv
+MSSP_ACO_ID=C1234
+MSSP_START_YEAR=2025
+MSSP_FILE_STORE=s3://your-private-claims-bucket/tier1/private-claims
+AWS_PROFILE=your-aws-profile
+AWS_REGION=us-east-1
+```
+
+Run the repo wrapper:
+
+```bash
+scripts/run_tier1_private_claims_s3.sh
+```
+
+The wrapper loads `.env`, then `.env.tier1-private`, verifies the file store is
+an `s3://` URI, and calls `uv run mssp-pipeline` with the same S3 location for
+download state, uploaded source files, and processing reads.
+
 ---
 
 ## Output Backends
