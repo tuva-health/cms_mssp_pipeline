@@ -409,7 +409,7 @@ The processing subsystem handles 8 MSSP ACO file types automatically. Files are 
 |---|---|---|---|
 | CCLF | Comprehensive Claim & Line Feed | Fixed-width text | 10+ `parta_*` / `partb_*` tables |
 | MSSP (ALR / BEUR / BAIP / NCBP) | Assignment and financial reports | CSV in zip | `AALR1_ASSIGNED_BENEFICIARIES`, `BEUR_*`, and others |
-| MCQM | Medicare Clinical Quality Measures | XLSX in zip | `MCQM_BENEFICIARIES`, `MCQM_DM_001SSP`, and others |
+| MCQM | Medicare Clinical Quality Measures | XLSX in zip through PY2025; CSV files in nested MCQM zip starting PY2026 | `MCQM_BENEFICIARIES`, `MCQM_DM_001SSP`, and others |
 | EXPU | Quarterly Expenditure & Utilization | XLSX | `EXPU_TABLE_1`, `EXPU_TABLE_2`, `EXPU_TABLE_3` |
 | BNEX | Beneficiary Nested Expenditure | CSV in zip | `BNEX_BENEFICIARY_NESTED_EXPENDITURE` |
 | BNEX MBI Xref | MBI cross-reference | CSV in zip | `BNEX_MBI_XREF` |

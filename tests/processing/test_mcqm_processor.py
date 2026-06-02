@@ -12,7 +12,7 @@ import pytest
 from mssp_pipeline.processing.defs.mcqm_file_defs import MCQM_FILE_DEFS
 from mssp_pipeline.processing.exporters.duckdb_exporter import DuckDBExporter
 from mssp_pipeline.processing.processors.mcqm_processor import MCQMProcessor
-from tests.processing.conftest import make_mcqm_zip
+from tests.processing.conftest import make_mcqm_2026_zip, make_mcqm_zip
 
 # ---------------------------------------------------------------------------
 # Shared test data
@@ -120,6 +120,24 @@ HTN_HEADERS = [
     "HTN_ENCOUNTER",
     "HTN_EXCLUSION",
     "HTN_FILTER",
+    "PROVIDER_1_NPI",
+    "PROVIDER_2_NPI",
+    "PROVIDER_3_NPI",
+    "TOP_CLINIC_ID",
+]
+
+CCS_HEADERS = [
+    "BENE_MBI_ID",
+    "BENE_1ST_NAME",
+    "BENE_LAST_NAME",
+    "BENE_SEX_CD",
+    "BENE_BRTH_DT",
+    "BENE_DEATH_DT",
+    "VA_SELECTION_ONLY",
+    "CCS_AGE",
+    "CCS_ENCOUNTER",
+    "CCS_EXCLUSION",
+    "CCS_FILTER",
     "PROVIDER_1_NPI",
     "PROVIDER_2_NPI",
     "PROVIDER_3_NPI",
@@ -242,6 +260,35 @@ def _all_sheets(bene_rows, dm_rows=None):
     }
 
 
+def _with_2026_metadata(headers, rows, quarter_num="1"):
+    return (
+        headers + ["ACO_ID", "PRFMNC_YR_NUM", "QRT_NUM"],
+        [row + ["T0000", "2026", quarter_num] for row in rows],
+    )
+
+
+def _all_2026_csvs(bene_rows, measure_rows=None, quarter_num="1"):
+    measure_rows = measure_rows or bene_rows[:1]
+    return {
+        "_MCQMbenes.csv": _with_2026_metadata(BENE_HEADERS, bene_rows, quarter_num),
+        "_001.csv": _with_2026_metadata(
+            DM_HEADERS, [r[:16] for r in measure_rows], quarter_num
+        ),
+        "_112.csv": _with_2026_metadata(
+            BCS_HEADERS, [r[:16] for r in measure_rows], quarter_num
+        ),
+        "_113.csv": _with_2026_metadata(
+            CCS_HEADERS, [r[:15] for r in measure_rows], quarter_num
+        ),
+        "_134.csv": _with_2026_metadata(
+            DEP_HEADERS, [r[:15] for r in measure_rows], quarter_num
+        ),
+        "_236.csv": _with_2026_metadata(
+            HTN_HEADERS, [r[:16] for r in measure_rows], quarter_num
+        ),
+    }
+
+
 def _run(session, config, full_refresh):
     exporter = DuckDBExporter(schema="raw_data", full_refresh=full_refresh)
     MCQMProcessor(session, exporter, config).run()
@@ -306,6 +353,27 @@ def test_measure_sheet_row_count(test_session, test_config, raw_dir):
     assert _count(test_session, "MCQM_BCS_112SSP") == 2
 
 
+def test_mcqm_2026_csv_beneficiaries_loaded(test_session, test_config, raw_dir):
+    make_mcqm_2026_zip(raw_dir, _all_2026_csvs([ROW_A_BENE, ROW_B_BENE]))
+    _run(test_session, test_config, full_refresh=True)
+
+    assert _count(test_session, "MCQM_BENEFICIARIES") == 2
+
+
+def test_mcqm_2026_measure_csvs_loaded(test_session, test_config, raw_dir):
+    make_mcqm_2026_zip(
+        raw_dir,
+        _all_2026_csvs([ROW_A_BENE], measure_rows=[ROW_A_DM, ROW_B_DM]),
+    )
+    _run(test_session, test_config, full_refresh=True)
+
+    assert _count(test_session, "MCQM_DM_001SSP") == 2
+    assert _count(test_session, "MCQM_BCS_112SSP") == 2
+    assert _count(test_session, "MCQM_CCS_113SSP") == 2
+    assert _count(test_session, "MCQM_DEP_134SSP") == 2
+    assert _count(test_session, "MCQM_HTN_236SSP") == 2
+
+
 # ---------------------------------------------------------------------------
 # Metadata columns
 # ---------------------------------------------------------------------------
@@ -361,6 +429,39 @@ def test_file_name_metadata(test_session, test_config, raw_dir):
     assert file_name in file_path, "FILE_NAME should appear within FILE_PATH"
 
 
+def test_mcqm_2026_metadata(test_session, test_config, raw_dir):
+    make_mcqm_2026_zip(raw_dir, _all_2026_csvs([ROW_A_BENE]))
+    _run(test_session, test_config, full_refresh=True)
+
+    row = test_session.connection.execute(
+        """
+        SELECT DISTINCT FILE_NAME, FILE_PATH, FILE_DATE, PERIOD
+        FROM raw_data.MCQM_BENEFICIARIES
+        """
+    ).fetchone()
+    file_name, file_path, file_date, period = row
+    assert file_name.endswith("_MCQMbenes.csv")
+    assert ".zip!" in file_path
+    assert file_name in file_path
+    assert file_date == date(2026, 3, 31)
+    assert period == "2026Q1"
+
+
+def test_mcqm_2025_and_2026_coexist(test_session, test_config, raw_dir):
+    make_mcqm_zip(raw_dir, _all_sheets([ROW_A_BENE]), quarter="2025Q4")
+    make_mcqm_2026_zip(raw_dir, _all_2026_csvs([ROW_B_BENE]), quarter="2026Q1")
+    _run(test_session, test_config, full_refresh=True)
+
+    assert _count(test_session, "MCQM_BENEFICIARIES") == 2
+    periods = {
+        row[0]
+        for row in test_session.connection.execute(
+            "SELECT DISTINCT PERIOD FROM raw_data.MCQM_BENEFICIARIES"
+        ).fetchall()
+    }
+    assert periods == {"2025Q4", "2026Q1"}
+
+
 # ---------------------------------------------------------------------------
 # Incremental deduplication
 # ---------------------------------------------------------------------------
@@ -386,6 +487,36 @@ def test_incremental_new_quarter_appends(test_session, incremental_config, raw_d
 
     make_mcqm_zip(
         raw_dir, _all_sheets([ROW_B_BENE]), quarter="2025Q4", date_str="259002"
+    )
+    _run(test_session, incremental_config, full_refresh=False)
+    assert _count(test_session, "MCQM_BENEFICIARIES") == 2
+
+
+def test_mcqm_2026_incremental_second_run_skips(
+    test_session, incremental_config, raw_dir
+):
+    make_mcqm_2026_zip(raw_dir, _all_2026_csvs([ROW_A_BENE, ROW_B_BENE]))
+    _run(test_session, incremental_config, full_refresh=False)
+    _run(test_session, incremental_config, full_refresh=False)
+
+    assert _count(test_session, "MCQM_BENEFICIARIES") == 2
+
+
+def test_mcqm_2026_new_quarter_appends(test_session, incremental_config, raw_dir):
+    make_mcqm_2026_zip(
+        raw_dir,
+        _all_2026_csvs([ROW_A_BENE], quarter_num="1"),
+        quarter="2026Q1",
+        date_str="269001",
+    )
+    _run(test_session, incremental_config, full_refresh=False)
+    assert _count(test_session, "MCQM_BENEFICIARIES") == 1
+
+    make_mcqm_2026_zip(
+        raw_dir,
+        _all_2026_csvs([ROW_B_BENE], quarter_num="2"),
+        quarter="2026Q2",
+        date_str="269002",
     )
     _run(test_session, incremental_config, full_refresh=False)
     assert _count(test_session, "MCQM_BENEFICIARIES") == 2

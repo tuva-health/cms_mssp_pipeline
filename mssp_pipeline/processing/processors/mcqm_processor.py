@@ -1,6 +1,6 @@
 import re
 from datetime import date, timedelta
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import duckdb
 
@@ -13,16 +13,19 @@ class MCQMProcessor(FileProcessor):
     """
     Processes MCQM (Medicare Clinical Quality Measures) files.
 
-    Files are xlsx workbooks (one worksheet per measure) embedded in
-    extension-less zip archives inside year/bundle directories:
+    Through PY2025, files are xlsx workbooks (one worksheet per measure)
+    embedded in extension-less zip archives inside year/bundle directories:
         FILE_STORE/ACO_ID/YEAR/P.ACO_ID*/P.ACO_ID.ACO.MCQM.YYYYQN.DATE.TIME
 
-    Uses DuckDB's read_xlsx() (excel extension) with UNION ALL BY NAME to read
-    all quarterly xlsx files in a single SQL query — no Python-level xlsx
-    parsing, no TEMP TABLE, no row-by-row inserts. Schema drift across quarters
-    (different column counts) is handled automatically by UNION ALL BY NAME.
+    Starting in PY2026, the MCQM zip is delivered inside the extracted QEXPU
+    bundle and contains one CSV per MCQM table:
+        FILE_STORE/ACO_ID/YEAR/.../P.ACO_ID.ACO.QEXPU.../
+            P.ACO_ID.ACO.MCQM.YYYYQN.DATE.TIME.zip
 
-    All column names are already uppercase in the source xlsx files.
+    Uses DuckDB's read_xlsx() for legacy workbooks and read_csv() for 2026+
+    CSVs, with UNION ALL BY NAME to handle schema drift across quarters.
+
+    All column names are already uppercase in the source xlsx/csv files.
 
     FILE_DATE is the last calendar day of the quarter period encoded in the
     filename (e.g., 2025Q4 → 2025-12-31). A PERIOD column (e.g., '2025Q4')
@@ -41,7 +44,8 @@ class MCQMProcessor(FileProcessor):
         because the session has already loaded and configured the relevant
         DuckDB extensions (httpfs/aws for S3, azure for ADLS).
 
-        Files are extension-less zips one level inside year/bundle directories:
+        Legacy files are extension-less zips one level inside year/bundle directories.
+        Starting in PY2026, files are .zip archives inside QEXPU bundle directories:
             FILE_STORE/ACO_ID/YEAR/P.ACO_ID*/P.ACO_ID.ACO.MCQM.YYYYQN.DATE.TIME
         """
         pattern = (
@@ -56,6 +60,14 @@ class MCQMProcessor(FileProcessor):
             print(f"  Warning: could not list MCQM zip paths (pattern={pattern}): {e}")
             return []
         return sorted(r[0] for r in rows)
+
+    def _period(self, filename: str) -> str:
+        m = re.search(r"\.(\d{4}Q\d)\.", filename)
+        return m.group(1) if m else ""
+
+    def _period_year(self, filename: str) -> Optional[int]:
+        m = re.search(r"\.(\d{4})Q\d\.", filename)
+        return int(m.group(1)) if m else None
 
     def _quarter_end_date(self, filename: str):
         """Return the last calendar day of the quarter encoded in the filename.
@@ -73,30 +85,42 @@ class MCQMProcessor(FileProcessor):
         return date(year, end_month + 1, 1) - timedelta(days=1)
 
     def _list_source_file_paths(self, file_def: MCQMFileDef) -> List[Tuple[str, str]]:
-        """Enumerate (file_path, source_path) for every xlsx in every MCQM zip.
+        """Enumerate (file_path, source_path) for every MCQM source file.
 
-        Uses DuckDB glob('zip://path!*.xlsx') to list zip contents — this works for
-        local, S3, and ADLS because zipfs already has the session credentials configured,
-        avoiding the need for Python's zipfile.ZipFile() which can't open cloud URIs.
+        Uses DuckDB glob('zip://path!*.xlsx') / glob('zip://path!*.csv') to list
+        zip contents. This works for local, S3, and ADLS because zipfs already has
+        the session credentials configured, avoiding Python zipfile reads that
+        can't open cloud URIs.
 
-        source_path: 'zip://zip_path!xlsx_name' — the path passed to read_xlsx()
+        source_path: 'zip://zip_path!internal_name' — the path passed to DuckDB
         file_path:   source_path with 'zip://' stripped — matches the FILE_PATH
                      value produced in _build_query()
         """
         zip_paths = self._find_zip_paths()
         result = []
         for zip_path in zip_paths:
+            period_year = self._period_year(zip_path)
+            is_csv_delivery = period_year is not None and period_year >= 2026
+            if is_csv_delivery:
+                glob_pattern = f"zip://{zip_path}!*.csv"
+            elif file_def.sheet_name:
+                glob_pattern = f"zip://{zip_path}!*.xlsx"
+            else:
+                continue
+
             try:
                 rows = self.session.connection.execute(
-                    f"SELECT * FROM glob({sql_string_literal(f'zip://{zip_path}!*.xlsx')})"
+                    f"SELECT * FROM glob({sql_string_literal(glob_pattern)})"
                 ).fetchall()
             except duckdb.IOException as e:
                 print(f"  Warning: could not list MCQM zip contents ({zip_path}): {e}")
                 continue
             for row in rows:
-                zip_ref = row[0]  # e.g. 'zip://s3://bucket/path/file!internal.xlsx'
-                xlsx_name = zip_ref.split("!")[-1]
-                if "Dictionary" in xlsx_name:
+                zip_ref = row[0]  # e.g. 'zip://s3://bucket/path/file!internal.csv'
+                internal_name = zip_ref.split("!")[-1]
+                if is_csv_delivery and not internal_name.endswith(file_def.csv_suffix):
+                    continue
+                if "Dictionary" in internal_name:
                     continue
                 file_path = zip_ref.replace("zip://", "")
                 result.append((file_path, zip_ref))
@@ -106,34 +130,52 @@ class MCQMProcessor(FileProcessor):
         """Build a UNION ALL BY NAME query over the provided zipfs source paths."""
         selects = []
         for source_path in source_paths:
-            # source_path is 'zip://zip_path!xlsx_name'
+            # source_path is 'zip://zip_path!internal_name'
             zip_ref = source_path
-            file_path = zip_ref.replace("zip://", "")
-
-            # Derive zip_path and xlsx_name for metadata
-            without_scheme = zip_ref[len("zip://"):]
-            zip_path, _, xlsx_name = without_scheme.partition("!")
-
-            combined = f"{zip_path}/{xlsx_name}"
-            period_m = re.search(r"\.(\d{4}Q\d)\.", combined)
-            period = period_m.group(1) if period_m else ""
-            file_date_val = self._quarter_end_date(combined)
-            file_date_sql = (
-                f"DATE '{file_date_val}'" if file_date_val else "NULL::DATE"
+            file_path, zip_path, internal_name, period, file_date_sql = (
+                self._source_metadata(zip_ref)
             )
+
+            if internal_name.lower().endswith(".csv"):
+                selects.append(f"""
+                    SELECT *,
+                           {sql_string_literal(file_path)}     AS FILE_PATH,
+                           {sql_string_literal(zip_path)}      AS DIRECTORY_NAME,
+                           {sql_string_literal(internal_name)} AS FILE_NAME,
+                           {file_date_sql} AS FILE_DATE,
+                           {sql_string_literal(period)}        AS PERIOD
+                    FROM read_csv({sql_string_literal(zip_ref)},
+                                  header=true,
+                                  auto_detect=true,
+                                  auto_type_candidates=['VARCHAR'],
+                                  union_by_name=true,
+                                  ignore_errors=true)
+                """)
+                continue
 
             selects.append(f"""
                     SELECT *,
-                           {sql_string_literal(file_path)} AS FILE_PATH,
-                           {sql_string_literal(zip_path)}  AS DIRECTORY_NAME,
-                           {sql_string_literal(xlsx_name)} AS FILE_NAME,
+                           {sql_string_literal(file_path)}     AS FILE_PATH,
+                           {sql_string_literal(zip_path)}      AS DIRECTORY_NAME,
+                           {sql_string_literal(internal_name)} AS FILE_NAME,
                            {file_date_sql} AS FILE_DATE,
-                           {sql_string_literal(period)}   AS PERIOD
+                           {sql_string_literal(period)}        AS PERIOD
                     FROM read_xlsx({sql_string_literal(zip_ref)},
-                                   sheet={sql_string_literal(file_def.sheet_name)},
+                                   sheet={sql_string_literal(file_def.sheet_name or '')},
                                    header=true,
                                    all_varchar=true)
                 """)
 
         print(f"  reading {len(source_paths)} source file(s)")
         return " UNION ALL BY NAME ".join(selects)
+
+    def _source_metadata(self, zip_ref: str) -> Tuple[str, str, str, str, str]:
+        """Return metadata values for a zipfs source reference."""
+        file_path = zip_ref.replace("zip://", "")
+        without_scheme = zip_ref[len("zip://"):]
+        zip_path, _, internal_name = without_scheme.partition("!")
+        combined = f"{zip_path}/{internal_name}"
+        period = self._period(combined)
+        file_date_val = self._quarter_end_date(combined)
+        file_date_sql = f"DATE '{file_date_val}'" if file_date_val else "NULL::DATE"
+        return file_path, zip_path, internal_name, period, file_date_sql

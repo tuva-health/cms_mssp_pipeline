@@ -4,6 +4,7 @@ state.json
 
 # Downloaded/extracted source files
 downloads/
+reference/
 
 # Processing staging directory
 STAGED/
