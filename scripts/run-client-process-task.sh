@@ -7,9 +7,9 @@ Usage:
   scripts/run-client-process-task.sh <client> [tag] [--database DB] [--schema SCHEMA] [--full-refresh] [--no-wait] [--skip-build] [--skip-deploy]
 
 Examples:
-  scripts/run-client-process-task.sh vbca --database VBCA_TUVA
-  scripts/run-client-process-task.sh vbca 2026-04-18-prod-process --database VBCA_TUVA --schema RAW_DATA
-  scripts/run-client-process-task.sh vbca --skip-build --skip-deploy --database VBCA_TUVA
+  scripts/run-client-process-task.sh client.example --database ANALYTICS_DB
+  scripts/run-client-process-task.sh client.example 2026-01-15 --database ANALYTICS_DB --schema RAW_DATA
+  scripts/run-client-process-task.sh client.example --skip-build --skip-deploy --database ANALYTICS_DB
 
 Notes:
   - Reuses the latest mssp-pipeline-runtime task definition.

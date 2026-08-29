@@ -7,10 +7,10 @@ Usage:
   scripts/deploy-and-smoke-client.sh <client> [tag] [--no-wait] [--skip-build] [--skip-deploy] [--] [command args...]
 
 Examples:
-  scripts/deploy-and-smoke-client.sh vbca
-  scripts/deploy-and-smoke-client.sh vbca 2026-04-17-pr4
-  scripts/deploy-and-smoke-client.sh vbca 2026-04-17-pr4 -- mssp-validate --target process --strict
-  scripts/deploy-and-smoke-client.sh vbca --skip-build --skip-deploy
+  scripts/deploy-and-smoke-client.sh client.example
+  scripts/deploy-and-smoke-client.sh client.example 2026-01-15
+  scripts/deploy-and-smoke-client.sh client.example 2026-01-15 -- mssp-validate --target process --strict
+  scripts/deploy-and-smoke-client.sh client.example --skip-build --skip-deploy
 
 Notes:
   - Builds and pushes a fresh image tag by default, then renders/registers/activates taskdefs.

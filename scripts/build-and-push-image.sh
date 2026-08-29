@@ -7,8 +7,8 @@ Usage:
   scripts/build-and-push-image.sh <client> [tag]
 
 Examples:
-  scripts/build-and-push-image.sh vbca
-  scripts/build-and-push-image.sh vbca 2026-04-14
+  scripts/build-and-push-image.sh client.example
+  scripts/build-and-push-image.sh client.example 2026-01-15
 
 Environment overrides:
   AWS_REGION        AWS region (falls back to client env.sh or aws config)
