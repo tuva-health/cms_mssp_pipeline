@@ -403,20 +403,26 @@ FABRIC_CLIENT_SECRET=client-secret
 
 ## Source File Types
 
-The processing subsystem handles 8 MSSP ACO file types automatically. Files are discovered by pattern under `FILE_STORE/ACO_ID/YEAR/`.
+The processing subsystem handles 10 MSSP ACO file types automatically. Files are discovered by pattern under `FILE_STORE/ACO_ID/YEAR/`.
 
 | File type | Description | Format | Output tables |
 |---|---|---|---|
 | CCLF | Comprehensive Claim & Line Feed | Fixed-width text | 10+ `parta_*` / `partb_*` tables |
 | MSSP (ALR / BEUR / BAIP / NCBP) | Assignment and financial reports | CSV in zip | `AALR1_ASSIGNED_BENEFICIARIES`, `BEUR_*`, and others |
 | MCQM | Medicare Clinical Quality Measures | XLSX in zip through PY2025; CSV files in nested MCQM zip starting PY2026 | `MCQM_BENEFICIARIES`, `MCQM_DM_001SSP`, and others |
-| EXPU | Quarterly Expenditure & Utilization | XLSX | `EXPU_TABLE_1`, `EXPU_TABLE_2`, `EXPU_TABLE_3` |
+| BNMRK | Historical Benchmark | XLSX | `BNMRK_TABLE_1`, `BNMRK_TABLE_1A`, `BNMRK_TABLE_1B`, `BNMRK_TABLE_1C`, `BNMRK_TABLE_2`–`BNMRK_TABLE_6`, `BNMRK_PARAMETERS` |
+| AEXPU | Annual Expenditure & Utilization (one workbook per benchmark year, delivered inside the BNMRK bundle) | XLSX | `AEXPU_TABLE_1`, `AEXPU_TABLE_1A`, `AEXPU_TABLE_3`, `AEXPU_TABLE_4`, `AEXPU_TABLE_4A`, `AEXPU_PARAMETERS` |
+| QEXPU | Quarterly Expenditure & Utilization | XLSX | `QEXPU_TABLE_1`, `QEXPU_TABLE_2`, `QEXPU_TABLE_3`, `QEXPU_PARAMETERS` |
 | BNEX | Beneficiary Nested Expenditure | CSV in zip | `BNEX_BENEFICIARY_NESTED_EXPENDITURE` |
 | BNEX MBI Xref | MBI cross-reference | CSV in zip | `BNEX_MBI_XREF` |
 | Shadow Bundles | Episode-level bundled payment data | CSV in zip | `SHADOW_BUNDLES` |
 | Participant List | ACO participant physician roster | XLSX | `PARTICIPANT_ROSTER` |
 
 Every output table includes `FILE_PATH`, `FILE_NAME`, `DIRECTORY_NAME`, and `FILE_DATE` metadata columns for lineage tracking and incremental deduplication.
+
+The BNMRK / AEXPU / QEXPU workbook tables are emitted in a long/tidy shape — `ROW_NUM`, `GROUP_LABEL`, `SECTION_CODE`, `SECTION_LABEL`, `ROW_LABEL`, `COLUMN_GROUP_LABEL`, `COLUMN_LABEL`, `VALUE_TEXT` — and additionally carry `ACO_ID`, `PERFORMANCE_YEAR`, `BENCHMARK_YEAR`, `SUBMISSION_ID` and `PERIOD`. All values are VARCHAR; typing and casting happen downstream.
+
+Not every delivery carries every sheet, and a missing one is expected rather than an error: `BNMRK_TABLE_6` (ACPT) is absent from the March preliminary benchmark, and the COVID-excluding `AEXPU_TABLE_1A` / `AEXPU_TABLE_4A` are present for benchmark years 1 and 2 but not benchmark year 3. Those tables are legitimately empty for the deliveries and years that omit them.
 
 ---
 
