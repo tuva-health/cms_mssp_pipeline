@@ -346,7 +346,6 @@ data "aws_iam_policy_document" "runtime_task_policy" {
       "s3:ListBucket",
       "s3:GetObject",
       "s3:PutObject",
-      "s3:DeleteObject",
     ]
     resources = var.runtime_s3_resource_arns
   }

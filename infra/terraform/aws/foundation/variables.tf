@@ -19,7 +19,7 @@ variable "tags" {
 
 variable "runtime_s3_resource_arns" {
   type        = list(string)
-  description = "S3 ARNs runtime task role can access (List/Get/Put/Delete)."
+  description = "S3 ARNs the runtime task role can access (List/Get/Put). Scope this to the file store; the default is deliberately broad and should be overridden per deployment."
   default     = ["arn:aws:s3:::*", "arn:aws:s3:::*/*"]
 }
 

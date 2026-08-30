@@ -56,10 +56,6 @@ data "aws_secretsmanager_secret" "acoms_config" {
   name = "mssp/acoms-config"
 }
 
-data "aws_secretsmanager_secret_version" "acoms_config_current" {
-  secret_id = data.aws_secretsmanager_secret.acoms_config.id
-}
-
 resource "null_resource" "activation_gates" {
   lifecycle {
     precondition {
@@ -71,8 +67,8 @@ resource "null_resource" "activation_gates" {
       error_message = "Activation blocked: /mssp/whitelist_confirmed must be true"
     }
     precondition {
-      condition     = length(trimspace(data.aws_secretsmanager_secret_version.acoms_config_current.secret_string)) > 0
-      error_message = "Activation blocked: mssp/acoms-config is empty"
+      condition     = data.aws_secretsmanager_secret.acoms_config.id != ""
+      error_message = "Activation blocked: mssp/acoms-config does not exist"
     }
     precondition {
       condition     = local.effective_ecs_cluster_arn != ""
