@@ -89,14 +89,23 @@ def run(
         resume_run_id=resume_run_id,
     )
 
+    # Phases already performed somewhere in the resume chain, mapped to the run
+    # that actually did the work. A phase an earlier run merely skipped because
+    # the operator passed --skip-* is deliberately not inherited: that is an
+    # instruction, not evidence the work happened.
+    resumed_phases: dict[str, str] = {}
     if resume_run_id:
         prior = RunManifest.load(resume_run_id, manifest_dir=Path(manifest_dir))
-        if prior.phase_status("download") == "completed":
-            skip_download = True
-            manifest.add_event("info", f"Resuming from run {resume_run_id}: skipping completed download phase")
-        if prior.phase_status("process") == "completed":
-            skip_process = True
-            manifest.add_event("info", f"Resuming from run {resume_run_id}: skipping completed process phase")
+        for phase in ("download", "process"):
+            origin = prior.phase_satisfied_by(phase)
+            if origin:
+                resumed_phases[phase] = origin
+                manifest.add_event(
+                    "info",
+                    f"Resuming from run {resume_run_id}: skipping {phase} phase performed by run {origin}",
+                )
+        skip_download = skip_download or "download" in resumed_phases
+        skip_process = skip_process or "process" in resumed_phases
 
     manifest.save()
 
@@ -149,7 +158,10 @@ def run(
             _print_run_summary(manifest, time.perf_counter() - started)
             raise
     else:
-        manifest.set_phase("download", "skipped", details={"reason": "skip_download=true or resume"})
+        if "download" in resumed_phases:
+            manifest.set_phase("download", "skipped", details={"reason": "resume", "satisfied_by": resumed_phases["download"]})
+        else:
+            manifest.set_phase("download", "skipped", details={"reason": "skip_download=true"})
 
     # --- Processing step ---
     if not skip_process:
@@ -176,7 +188,10 @@ def run(
             _print_run_summary(manifest, time.perf_counter() - started)
             raise
     else:
-        manifest.set_phase("process", "skipped", details={"reason": "skip_process=true or resume"})
+        if "process" in resumed_phases:
+            manifest.set_phase("process", "skipped", details={"reason": "resume", "satisfied_by": resumed_phases["process"]})
+        else:
+            manifest.set_phase("process", "skipped", details={"reason": "skip_process=true"})
 
     # Optional local cleanup (opt-in): acoms-cli always writes to local disk
     # first, even when a remote store is used.

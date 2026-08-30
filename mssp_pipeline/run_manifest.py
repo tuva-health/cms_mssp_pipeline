@@ -124,6 +124,24 @@ class RunManifest:
     def phase_status(self, phase: str) -> str | None:
         return self.data.get("phases", {}).get(phase, {}).get("status")
 
+    def phase_details(self, phase: str) -> dict:
+        return self.data.get("phases", {}).get(phase, {}).get("details") or {}
+
+    def phase_satisfied_by(self, phase: str) -> str | None:
+        """Return the run that actually performed this phase, if any.
+
+        A phase this run completed itself is satisfied by this run. A phase
+        skipped because an earlier run in a resume chain had already done it
+        carries that run's id forward, so a chain of resumes still points at
+        the run that did the work.
+        """
+        if self.phase_status(phase) == "completed":
+            return self.run_id
+        if self.phase_status(phase) == "skipped":
+            satisfied_by = self.phase_details(phase).get("satisfied_by")
+            return str(satisfied_by) if satisfied_by else None
+        return None
+
     def finalize(self, status: str) -> None:
         self.data["status"] = status
         self.data["ended_at"] = _utc_now()
