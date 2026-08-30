@@ -12,7 +12,9 @@ RUN apt-get update \
 
 COPY pyproject.toml README.md ./
 COPY mssp_pipeline ./mssp_pipeline
-COPY bin ./bin
+# Only the Linux build is useful here, and copying it to the final name means
+# the wheel built below also carries the correct architecture.
+COPY bin/acoms-cli-linux ./bin/acoms-cli
 COPY docker/entrypoint.sh /usr/local/bin/mssp-entrypoint
 COPY docker/bootstrap-config.sh /usr/local/bin/mssp-bootstrap-config
 
@@ -21,9 +23,8 @@ RUN python -m pip install --upgrade pip \
     && pip install ".[$PIP_EXTRAS]"
 
 RUN set -eux; \
-    if [ -f /app/bin/acoms-cli-linux ]; then cp /app/bin/acoms-cli-linux /app/bin/acoms-cli; fi; \
     chmod +x /usr/local/bin/mssp-entrypoint /usr/local/bin/mssp-bootstrap-config; \
-    if [ -f /app/bin/acoms-cli ]; then chmod +x /app/bin/acoms-cli; fi
+    chmod +x /app/bin/acoms-cli
 
 ENTRYPOINT ["mssp-entrypoint"]
 CMD ["mssp-pipeline"]
