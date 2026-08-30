@@ -262,47 +262,6 @@ def make_mcqm_2026_zip(
     return zip_path
 
 
-# ---------------------------------------------------------------------------
-# EXPU xlsx factory
-# ---------------------------------------------------------------------------
-
-
-def make_expu_xlsx(
-    raw_dir: Path,
-    sheet_data: dict,
-    quarter: str = "2025Q1",
-    date_str: str = "259999",
-    time_str: str = "0100000",
-) -> Path:
-    """Create an EXPU xlsx fixture mirroring the delivery structure:
-
-        raw_dir/T0000/2025/P.T0000.ACO.QEXPU.{quarter}.D{date_str}.T{time_str}/
-            P.T0000.ACO.QEXPU.{quarter}.D{date_str}.T{time_str}.xlsx
-
-    Unlike MCQM, the xlsx is written directly into the bundle directory — there
-    is no additional zip wrapper. sheet_data is a dict of
-    {sheet_name: [[row], [row], ...]} where rows are plain lists (no separate
-    headers list — all rows including title rows are passed as data since the
-    processor reads with header=false).
-
-    Returns the path to the created xlsx file.
-    """
-    base = f"P.{ACO_ID}.ACO.QEXPU.{quarter}.D{date_str}.T{time_str}"
-    bundle_dir = raw_dir / ACO_ID / "2025" / "QEXPU" / base
-    bundle_dir.mkdir(parents=True, exist_ok=True)
-
-    wb = openpyxl.Workbook()
-    wb.remove(wb.active)  # remove the default blank sheet
-    for sheet_name, rows in sheet_data.items():
-        ws = wb.create_sheet(sheet_name)
-        for row in rows:
-            ws.append(row)
-
-    xlsx_path = bundle_dir / f"{base}.xlsx"
-    wb.save(xlsx_path)
-    return xlsx_path
-
-
 def make_mssp_zip(
     raw_dir: Path,
     file_def: MSSPFileDef,

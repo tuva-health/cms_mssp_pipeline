@@ -52,7 +52,9 @@ def run(config=None) -> None:
     from mssp_pipeline.processing.processors.participant_list_processor import ParticipantListProcessor
     from mssp_pipeline.processing.processors.bnex_processor import BNEXProcessor
     from mssp_pipeline.processing.processors.bnex_mbi_xref_processor import BNEXMBIXrefProcessor
-    from mssp_pipeline.processing.processors.expu_processor import EXPUProcessor
+    from mssp_pipeline.processing.processors.bnmrk_processor import BNMRKProcessor
+    from mssp_pipeline.processing.processors.aexpu_processor import AEXPUProcessor
+    from mssp_pipeline.processing.processors.qexpu_processor import QEXPUProcessor
 
     from mssp_pipeline.processing.exceptions import ProcessingStartupError
 
@@ -71,7 +73,9 @@ def run(config=None) -> None:
         ParticipantListProcessor(session, exporter, config).run()
         BNEXProcessor(session, exporter, config).run()
         BNEXMBIXrefProcessor(session, exporter, config).run()
-        EXPUProcessor(session, exporter, config).run()
+        BNMRKProcessor(session, exporter, config).run()
+        AEXPUProcessor(session, exporter, config).run()
+        QEXPUProcessor(session, exporter, config).run()
     finally:
         session.close()
         _cleanup_temp_location(config)
