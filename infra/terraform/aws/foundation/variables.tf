@@ -19,8 +19,12 @@ variable "tags" {
 
 variable "runtime_s3_resource_arns" {
   type        = list(string)
-  description = "S3 ARNs the runtime task role can access (List/Get/Put). Scope this to the file store; the default is deliberately broad and should be overridden per deployment."
-  default     = ["arn:aws:s3:::*", "arn:aws:s3:::*/*"]
+  description = "S3 ARNs the runtime task role may list, read and write. Scope to the file store bucket. Required: there is no safe default, since a wildcard grants the task role access to every bucket in the account."
+
+  validation {
+    condition     = length(var.runtime_s3_resource_arns) > 0
+    error_message = "Set runtime_s3_resource_arns to the file store bucket ARNs, for example [\"arn:aws:s3:::my-bucket\", \"arn:aws:s3:::my-bucket/*\"]."
+  }
 }
 
 variable "snowflake_rsa_key_secret_name" {

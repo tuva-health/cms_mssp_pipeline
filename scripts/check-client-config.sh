@@ -240,7 +240,7 @@ case "$MODE" in
   foundation)
     check_aws_auth
     check_region
-    check_tfvars_keys "$CLIENT_DIR/foundation.tfvars" region
+    check_tfvars_keys "$CLIENT_DIR/foundation.tfvars" region runtime_s3_resource_arns
     check_tfvars_no_placeholders "$CLIENT_DIR/foundation.tfvars" region
     ;;
   activate)
@@ -264,7 +264,7 @@ case "$MODE" in
   all)
     check_aws_auth
     check_region
-    check_tfvars_keys "$CLIENT_DIR/foundation.tfvars" region
+    check_tfvars_keys "$CLIENT_DIR/foundation.tfvars" region runtime_s3_resource_arns
     check_tfvars_no_placeholders "$CLIENT_DIR/foundation.tfvars" region
     check_tfvars_keys "$CLIENT_DIR/activate.tfvars" region schedule_expression
     check_tfvars_no_placeholders "$CLIENT_DIR/activate.tfvars" region schedule_expression

@@ -15,9 +15,8 @@ project_name = "mssp-pipeline"
 # snowflake_rsa_key_passphrase_secret_name = "mssp/snowflake/rsa-key-passphrase"
 
 # Buckets the runtime task role may list, read and write. Scope this to the
-# file store. Leaving it unset falls back to a default of every bucket in the
-# account, which is far wider than any deployment needs.
+# file store. Required: terraform will not plan without it.
 runtime_s3_resource_arns = [
-  "arn:aws:s3:::my-mssp-file-store",
-  "arn:aws:s3:::my-mssp-file-store/*",
+  "arn:aws:s3:::<MSSP_BUCKET>",
+  "arn:aws:s3:::<MSSP_BUCKET>/*",
 ]
