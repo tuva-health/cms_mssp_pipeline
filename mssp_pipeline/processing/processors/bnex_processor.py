@@ -3,6 +3,7 @@ from typing import List, Tuple
 import duckdb
 
 from .base import FileProcessor
+from ..exceptions import SourceDiscoveryError, is_empty_glob
 from ..defs.bnex_file_defs import BNEXFileDef, BNEX_FILE_DEFS
 from ..sql import sql_string_literal
 
@@ -49,8 +50,11 @@ class BNEXProcessor(FileProcessor):
                 f"SELECT * FROM glob({sql_string_literal(pattern)})"
             ).fetchall()
         except duckdb.IOException as e:
-            print(f"  Warning: could not list BNEX source files (pattern={pattern}): {e}")
-            return []
+            if is_empty_glob(e):
+                return []
+            raise SourceDiscoveryError(
+                f"Could not list BNEX source files (pattern={pattern}): {e}"
+            ) from e
         # FILE_PATH == source_path: read_xml's `filename` column returns the direct path.
         return [(r[0], r[0]) for r in rows]
 

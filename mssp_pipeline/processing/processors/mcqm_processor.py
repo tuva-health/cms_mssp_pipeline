@@ -5,6 +5,7 @@ from typing import List, Optional, Tuple
 import duckdb
 
 from .base import FileProcessor
+from ..exceptions import SourceDiscoveryError, is_empty_glob
 from ..defs.mcqm_file_defs import MCQMFileDef, MCQM_FILE_DEFS
 from ..sql import sql_string_literal
 
@@ -57,8 +58,11 @@ class MCQMProcessor(FileProcessor):
                 f"SELECT * FROM glob({sql_string_literal(pattern)})"
             ).fetchall()
         except duckdb.IOException as e:
-            print(f"  Warning: could not list MCQM zip paths (pattern={pattern}): {e}")
-            return []
+            if is_empty_glob(e):
+                return []
+            raise SourceDiscoveryError(
+                f"Could not list MCQM zip paths (pattern={pattern}): {e}"
+            ) from e
         return sorted(r[0] for r in rows)
 
     def _period(self, filename: str) -> str:

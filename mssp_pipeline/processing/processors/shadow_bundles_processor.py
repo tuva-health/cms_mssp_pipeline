@@ -3,6 +3,7 @@ from typing import List, Tuple
 import duckdb
 
 from .base import FileProcessor
+from ..exceptions import SourceDiscoveryError, is_empty_glob
 from ..defs.shadow_bundles_defs import ShadowBundleFileDef, SHADOW_BUNDLES_FILE_DEFS
 from ..sql import sql_string_literal, validate_identifier
 
@@ -38,8 +39,11 @@ class ShadowBundlesProcessor(FileProcessor):
                 f"SELECT * FROM glob({sql_string_literal(pattern)})"
             ).fetchall()
         except duckdb.IOException as e:
-            print(f"  Warning: could not list shadow bundles source files (pattern={pattern}): {e}")
-            return []
+            if is_empty_glob(e):
+                return []
+            raise SourceDiscoveryError(
+                f"Could not list shadow bundles source files (pattern={pattern}): {e}"
+            ) from e
         return [(r[0], r[0]) for r in rows]
 
     def _build_query(self, file_def: ShadowBundleFileDef, source_paths: List[str]) -> str:
