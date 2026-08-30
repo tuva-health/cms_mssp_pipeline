@@ -83,6 +83,12 @@ dev = [
     "azure-identity",
     "azure-storage-blob",
     "google-cloud-storage",
+    # The Snowflake exporter's tests import the connector directly. Production
+    # still imports it lazily in build_exporter, so a minimal install needs no
+    # cloud SDKs; the test suite does.
+    "snowflake-connector-python",
+    "cryptography",
+    "keyring",
 ]
 
 [tool.hatch.build.targets.wheel]

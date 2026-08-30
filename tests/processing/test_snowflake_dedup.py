@@ -3,7 +3,14 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from mssp_pipeline.processing.exporters.snowflake_exporter import SnowflakeExporter
+import pytest
+
+pytest.importorskip(
+    "snowflake.connector",
+    reason="requires the snowflake extra; production imports it lazily in build_exporter",
+)
+
+from mssp_pipeline.processing.exporters.snowflake_exporter import SnowflakeExporter  # noqa: E402
 
 
 def _make_exporter() -> SnowflakeExporter:
