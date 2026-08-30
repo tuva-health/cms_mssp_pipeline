@@ -1,6 +1,6 @@
 import os
 
-from .base import normalize_identifier, normalize_query
+from .base import normalize_identifier, normalize_query, string_literal
 
 _CLOUD_PREFIXES = ('s3://', 'az://', 'azure://', 'abfss://', 'gs://')
 
@@ -17,7 +17,7 @@ class ParquetExporter:
     def _file_exists(self, duckdb_connection, path: str) -> bool:
         """Check whether a Parquet file exists — works for local and cloud paths."""
         try:
-            duckdb_connection.execute(f"SELECT 1 FROM read_parquet('{path}') LIMIT 0")
+            duckdb_connection.execute(f"SELECT 1 FROM read_parquet({string_literal(path)}) LIMIT 0")
             return True
         except Exception:
             return False
@@ -32,26 +32,26 @@ class ParquetExporter:
             if existing and not self._is_cloud:
                 os.remove(destination)
             print(f"Exporting results to Parquet: {destination}")
-            duckdb_connection.execute(f"COPY ({query}) TO '{destination}' (FORMAT PARQUET)")
+            duckdb_connection.execute(f"COPY ({query}) TO {string_literal(destination)} (FORMAT PARQUET)")
         else:
             print(f"Appending new rows to Parquet: {destination}")
             if self._is_cloud:
                 # Cloud storage has no atomic rename; write merged result directly.
                 duckdb_connection.execute(f"""
                     COPY (
-                        SELECT * FROM read_parquet('{destination}')
+                        SELECT * FROM read_parquet({string_literal(destination)})
                         UNION ALL
                         SELECT * FROM ({query}) AS src
-                    ) TO '{destination}' (FORMAT PARQUET)
+                    ) TO {string_literal(destination)} (FORMAT PARQUET)
                 """)
             else:
                 tmp_path = destination + '.tmp'
                 duckdb_connection.execute(f"""
                     COPY (
-                        SELECT * FROM read_parquet('{destination}')
+                        SELECT * FROM read_parquet({string_literal(destination)})
                         UNION ALL
                         SELECT * FROM ({query}) AS src
-                    ) TO '{tmp_path}' (FORMAT PARQUET)
+                    ) TO {string_literal(tmp_path)} (FORMAT PARQUET)
                 """)
                 os.replace(tmp_path, destination)
 
@@ -70,8 +70,12 @@ class ParquetExporter:
             return [
                 row[0]
                 for row in duckdb_connection.execute(
-                    f"SELECT DISTINCT FILE_PATH FROM read_parquet('{destination}')"
+                    f"SELECT DISTINCT FILE_PATH FROM read_parquet({string_literal(destination)})"
                 ).fetchall()
             ]
         except Exception:
             return []
+
+    def get_missing_file_paths(self, table_name: str, candidate_file_paths: list[str], duckdb_connection) -> list[str]:
+        existing = set(self.get_existing_file_paths(table_name, duckdb_connection))
+        return [path for path in candidate_file_paths if path not in existing]

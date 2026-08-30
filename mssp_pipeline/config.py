@@ -20,6 +20,7 @@ Environment variable overrides (loaded from .env, then the process environment):
 """
 
 import os
+from dataclasses import dataclass, fields
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -54,8 +55,13 @@ START_YEAR: int = int(os.environ.get("MSSP_START_YEAR", "2025"))
 # 'incremental' (default) or 'full'
 DOWNLOAD_MODE: str = os.environ.get("MSSP_DOWNLOAD_MODE", "incremental")
 
-# Path to the acoms-cli binary shipped with this package
-CLI_PATH: Path = Path(__file__).parent.parent / "bin" / "acoms-cli"
+# Path to the acoms-cli binary shipped with this package.
+# In containers, set MSSP_CLI_PATH=/app/bin/acoms-cli when the binary is copied
+# outside the installed site-packages directory.
+CLI_PATH: Path = Path(os.environ.get(
+    "MSSP_CLI_PATH",
+    str(Path(__file__).parent.parent / "bin" / "acoms-cli"),
+))
 
 # Local state tracking file (used when not uploading to S3)
 STATE_FILE: Path = Path("state.json")
@@ -87,6 +93,14 @@ MOTHERDUCK_TOKEN: str = os.environ.get("MOTHERDUCK_TOKEN", "")
 
 # REQUIRED FOR SNOWFLAKE / DATABRICKS / BIGQUERY / REDSHIFT / FABRIC OUTPUTS
 TEMP_LOCATION: str = os.path.expanduser(os.environ.get("MSSP_TEMP_LOCATION", "./STAGED"))
+
+# Processing batch sizing. These limits cap how many source files a processor
+# includes in a single DuckDB query/export batch to reduce peak memory usage.
+PROCESS_BATCH_SIZE_DEFAULT: int = int(os.environ.get("MSSP_PROCESS_BATCH_SIZE_DEFAULT", "25"))
+PROCESS_BATCH_SIZE_CCLF: int = int(os.environ.get("MSSP_PROCESS_BATCH_SIZE_CCLF", "3"))
+PROCESS_BATCH_SIZE_MSSP: int = int(os.environ.get("MSSP_PROCESS_BATCH_SIZE_MSSP", "25"))
+PROCESS_BATCH_SIZE_MCQM: int = int(os.environ.get("MSSP_PROCESS_BATCH_SIZE_MCQM", "5"))
+PROCESS_BATCH_SIZE_EXPU: int = int(os.environ.get("MSSP_PROCESS_BATCH_SIZE_EXPU", "2"))
 
 # SNOWFLAKE OUTPUT CONFIGURATION
 RSA_KEY_PATH: str = os.path.expanduser(os.environ.get(
@@ -207,3 +221,65 @@ GCS_CREDENTIALS_PATH: str = os.environ.get(
 )
 GCS_KEY_ID: str = os.environ.get("GCS_KEY_ID", "")
 GCS_SECRET: str = os.environ.get("GCS_SECRET", "")
+
+
+@dataclass
+class RuntimeConfig:
+    """Typed runtime configuration shared by integration + processing."""
+
+    # Shared
+    ACO_ID: str
+    FILE_STORE: str
+
+    # Integration
+    START_YEAR: int
+    DOWNLOAD_MODE: str
+    CLI_PATH: Path
+    STATE_FILE: Path
+    REMOTE_FILE_STORE: str | None
+    S3_BUCKET: str | None
+
+    # Processing
+    OUTPUT_TYPE: str
+    FULL_REFRESH: bool
+    OUTPUT_LOCATION: str
+    MOTHERDUCK_DATABASE: str
+    MOTHERDUCK_TOKEN: str
+    TEMP_LOCATION: str
+    PROCESS_BATCH_SIZE_DEFAULT: int
+    PROCESS_BATCH_SIZE_CCLF: int
+    PROCESS_BATCH_SIZE_MSSP: int
+    PROCESS_BATCH_SIZE_MCQM: int
+    PROCESS_BATCH_SIZE_EXPU: int
+
+    # Backend configs
+    SNOWFLAKE: SnowflakeConfig
+    DATABRICKS: DatabricksConfig
+    REDSHIFT: RedshiftConfig
+    BIGQUERY: BigQueryConfig
+    FABRIC: FabricConfig
+
+    # Source access
+    AWS_REGION: str
+    AWS_PROFILE: str
+    AWS_ACCESS_KEY_ID: str
+    AWS_SECRET_ACCESS_KEY: str
+    AZURE_STORAGE_CONNECTION_STRING: str
+    AZURE_STORAGE_ACCOUNT: str
+    GCS_PROJECT_ID: str
+    GCS_CREDENTIALS_PATH: str
+    GCS_KEY_ID: str
+    GCS_SECRET: str
+
+
+def runtime_values() -> dict[str, object]:
+    """Return config values that map directly to RuntimeConfig fields."""
+    names = {f.name for f in fields(RuntimeConfig)}
+    return {name: globals()[name] for name in names}
+
+
+def runtime_config(**overrides: object) -> RuntimeConfig:
+    """Build a mutable typed runtime config with optional overrides."""
+    values = runtime_values()
+    values.update({k: v for k, v in overrides.items() if v is not None})
+    return RuntimeConfig(**values)

@@ -1,6 +1,7 @@
 import duckdb
 import os
-import sys
+
+from .sql import sql_string_literal
 
 
 class DuckDBSession:
@@ -10,11 +11,8 @@ class DuckDBSession:
 
     def __init__(self, config):
         self._config = config
-        try:
-            self.connection = self._connect(config)
-        except Exception as e:
-            print(f"❌ Error initializing DuckDB ({config.OUTPUT_TYPE}): {e}")
-            sys.exit(1)
+        self.connection = self._connect(config)
+        self._configure_runtime_storage()
         self._load_extensions()
 
     def _connect(self, config) -> duckdb.DuckDBPyConnection:
@@ -44,6 +42,19 @@ class DuckDBSession:
             raise ValueError(
                 f"config.OUTPUT_TYPE must be PARQUET, DUCKDB, MOTHERDUCK, SNOWFLAKE, DATABRICKS, BIGQUERY, REDSHIFT, or FABRIC, got: {output_type}"
             )
+
+    def _configure_runtime_storage(self) -> None:
+        """Configure DuckDB temporary spill storage for local writable scratch paths."""
+        temp_location = getattr(self._config, "TEMP_LOCATION", "")
+        if not temp_location:
+            return
+        # DuckDB temp_directory must point to a local filesystem path. Keep cloud
+        # output locations out of this setting, but allow local staging/scratch dirs
+        # such as /tmp/mssp-staging in ECS/Fargate.
+        if temp_location.startswith(("s3://", "az://", "azure://", "abfss://", "gs://")):
+            return
+        os.makedirs(temp_location, exist_ok=True)
+        self.connection.execute(f"SET temp_directory = {sql_string_literal(temp_location)};")
 
     def _load_extensions(self):
         self.connection.execute(
@@ -77,28 +88,28 @@ class DuckDBSession:
 
         profile = getattr(self._config, "AWS_PROFILE", "")
         if profile:
-            self.connection.execute(f"CALL load_aws_credentials('{profile}');")
+            self.connection.execute(f"CALL load_aws_credentials({sql_string_literal(profile)});")
         else:
             self.connection.execute("CALL load_aws_credentials();")
 
         region = self._config.AWS_REGION or "us-east-1"
 
         if self._config.AWS_REGION:
-            self.connection.execute(f"SET s3_region = '{self._config.AWS_REGION}';")
+            self.connection.execute(f"SET s3_region = {sql_string_literal(self._config.AWS_REGION)};")
 
         # Explicit key override — only applied when set in config (non-empty string).
         # Prefer leaving these blank and using a profile or the credential chain above.
         if self._config.AWS_ACCESS_KEY_ID:
             key_id = self._config.AWS_ACCESS_KEY_ID
             secret = self._config.AWS_SECRET_ACCESS_KEY
-            self.connection.execute(f"SET s3_access_key_id = '{key_id}';")
-            self.connection.execute(f"SET s3_secret_access_key = '{secret}';")
+            self.connection.execute(f"SET s3_access_key_id = {sql_string_literal(key_id)};")
+            self.connection.execute(f"SET s3_secret_access_key = {sql_string_literal(secret)};")
             self.connection.execute(f"""
                 CREATE OR REPLACE SECRET s3_credentials (
                     TYPE S3,
-                    KEY_ID '{key_id}',
-                    SECRET '{secret}',
-                    REGION '{region}'
+                    KEY_ID {sql_string_literal(key_id)},
+                    SECRET {sql_string_literal(secret)},
+                    REGION {sql_string_literal(region)}
                 )
             """)
         else:
@@ -111,7 +122,7 @@ class DuckDBSession:
                     CREATE OR REPLACE SECRET s3_credentials (
                         TYPE S3,
                         PROVIDER CREDENTIAL_CHAIN,
-                        REGION '{region}'
+                        REGION {sql_string_literal(region)}
                     )
                 """)
             except Exception:
@@ -128,9 +139,9 @@ class DuckDBSession:
                     self.connection.execute(f"""
                         CREATE OR REPLACE SECRET s3_credentials (
                             TYPE S3,
-                            KEY_ID '{key_id}',
-                            SECRET '{secret}',
-                            REGION '{region}'
+                            KEY_ID {sql_string_literal(key_id)},
+                            SECRET {sql_string_literal(secret)},
+                            REGION {sql_string_literal(region)}
                         )
                     """)
                 else:
@@ -199,7 +210,7 @@ class DuckDBSession:
             self.connection.execute(f"""
                 CREATE SECRET azure_secret (
                     TYPE AZURE,
-                    CONNECTION_STRING '{conn_str}'
+                    CONNECTION_STRING {sql_string_literal(conn_str)}
                 )
             """)
         elif self._config.AZURE_STORAGE_ACCOUNT:
@@ -209,7 +220,7 @@ class DuckDBSession:
                 CREATE SECRET azure_secret (
                     TYPE AZURE,
                     PROVIDER CREDENTIAL_CHAIN,
-                    ACCOUNT_NAME '{account}'
+                    ACCOUNT_NAME {sql_string_literal(account)}
                 )
             """)
         else:
@@ -232,12 +243,12 @@ class DuckDBSession:
             )
 
         project_id = getattr(self._config, "GCS_PROJECT_ID", "")
-        project_clause = f", PROJECT_ID '{project_id}'" if project_id else ""
+        project_clause = f", PROJECT_ID {sql_string_literal(project_id)}" if project_id else ""
         self.connection.execute(f"""
             CREATE OR REPLACE SECRET gcs_credentials (
                 TYPE GCS,
-                KEY_ID '{key_id}',
-                SECRET '{secret}'{project_clause}
+                KEY_ID {sql_string_literal(key_id)},
+                SECRET {sql_string_literal(secret)}{project_clause}
             )
         """)
 

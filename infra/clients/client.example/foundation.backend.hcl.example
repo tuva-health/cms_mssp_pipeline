@@ -1,0 +1,6 @@
+# Optional: configure remote state for foundation stage
+bucket         = "my-tf-state-bucket"
+key            = "mssp/acme/foundation.tfstate"
+region         = "us-east-1"
+dynamodb_table = "terraform-state-locks"
+encrypt        = true

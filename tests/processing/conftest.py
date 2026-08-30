@@ -103,6 +103,11 @@ def test_config(raw_dir):
         FILE_STORE=str(raw_dir),
         OUTPUT_TYPE="DUCKDB",
         FULL_REFRESH=True,
+        PROCESS_BATCH_SIZE_DEFAULT=25,
+        PROCESS_BATCH_SIZE_CCLF=1,
+        PROCESS_BATCH_SIZE_MSSP=25,
+        PROCESS_BATCH_SIZE_MCQM=5,
+        PROCESS_BATCH_SIZE_EXPU=2,
     )
 
 
@@ -113,6 +118,11 @@ def incremental_config(raw_dir):
         FILE_STORE=str(raw_dir),
         OUTPUT_TYPE="DUCKDB",
         FULL_REFRESH=False,
+        PROCESS_BATCH_SIZE_DEFAULT=25,
+        PROCESS_BATCH_SIZE_CCLF=1,
+        PROCESS_BATCH_SIZE_MSSP=25,
+        PROCESS_BATCH_SIZE_MCQM=5,
+        PROCESS_BATCH_SIZE_EXPU=2,
     )
 
 
@@ -210,6 +220,45 @@ def make_mcqm_zip(
     zip_path = bundle_dir / base
     with zipfile.ZipFile(zip_path, "w") as zf:
         zf.writestr(xlsx_name, xlsx_bytes.read())
+    return zip_path
+
+
+def make_mcqm_2026_zip(
+    raw_dir: Path,
+    csv_data: dict,
+    quarter: str = "2026Q1",
+    date_str: str = "269999",
+    time_str: str = "0100000",
+) -> Path:
+    """Create a 2026+ MCQM zip fixture embedded in a QEXPU bundle:
+
+        raw_dir/T0000/2026/QEXPU/P.T0000.ACO.QEXPU.D{date_str}.T{time_str}/
+            P.T0000.ACO.MCQM.{quarter}.D{date_str}.T{time_str}.zip
+                ├── P.T0000.ACO.MCQM.{quarter}.D..._MCQMbenes.csv
+                ├── P.T0000.ACO.MCQM.{quarter}.D..._001.csv
+                └── PY2026Q1MCQMDataDictionary.xlsx
+
+    csv_data is a dict of {suffix: (headers_list, rows_list)} where suffix is
+    one of '_MCQMbenes.csv', '_001.csv', etc.
+    """
+    base = f"P.{ACO_ID}.ACO.MCQM.{quarter}.D{date_str}.T{time_str}"
+    bundle_dir_name = f"P.{ACO_ID}.ACO.QEXPU.D{date_str}.T{time_str}"
+    bundle_dir = raw_dir / ACO_ID / "2026" / "QEXPU" / bundle_dir_name
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+
+    dictionary = io.BytesIO()
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Data Dictionary"
+    ws.append(["Variable ID", "Description"])
+    wb.save(dictionary)
+    dictionary.seek(0)
+
+    zip_path = bundle_dir / f"{base}.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr(f"PY{quarter}MCQMDataDictionary.xlsx", dictionary.read())
+        for suffix, (headers, rows) in csv_data.items():
+            zf.writestr(f"{base}{suffix}", build_csv_bytes(headers, rows))
     return zip_path
 
 

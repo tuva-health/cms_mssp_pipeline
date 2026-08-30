@@ -283,6 +283,24 @@ def test_sheet_prefix_matching(test_session, test_config, raw_dir):
     assert _count(test_session, "EXPU_TABLE_3") == len(T3_ROWS)
 
 
+def test_expu_handles_quotes_in_paths_and_sheet_names(test_session, test_config, raw_dir):
+    make_expu_xlsx(
+        raw_dir,
+        _all_sheets(
+            t1_name="Table_1-O'Brien_Report",
+            t2_name="Table_2-O'Brien_Regional",
+            t3_name="Table_3-O'Brien_SNF",
+        ),
+        quarter="2025Q1",
+        time_str="0100'000",
+    )
+    _run(test_session, test_config, full_refresh=True)
+
+    assert _count(test_session, "EXPU_TABLE_1") == len(T1_ROWS)
+    assert _count(test_session, "EXPU_TABLE_2") == (len(T2_ROWS) - 7) * 5
+    assert _count(test_session, "EXPU_TABLE_3") == len(T3_ROWS)
+
+
 # ---------------------------------------------------------------------------
 # Section column — Tables 1 & 3
 # ---------------------------------------------------------------------------

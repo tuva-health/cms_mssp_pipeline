@@ -1,0 +1,48 @@
+{
+  "family": "mssp-pipeline-bootstrap",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  },
+  "executionRoleArn": "<TASK_EXECUTION_ROLE_ARN>",
+  "taskRoleArn": "<BOOTSTRAP_TASK_ROLE_ARN>",
+  "containerDefinitions": [
+    {
+      "name": "mssp-bootstrap",
+      "image": "<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/mssp-pipeline:<TAG>",
+      "essential": true,
+      "command": ["mssp-bootstrap-config"],
+      "environment": [
+        { "name": "MSSP_WORKDIR", "value": "/app" },
+        { "name": "MSSP_CLI_PATH", "value": "/app/bin/acoms-cli" },
+        { "name": "ACOMS_CONFIG_SECRET_ID", "value": "mssp/acoms-config" },
+        { "name": "BOOTSTRAP_COMPLETE_PARAM", "value": "/mssp/bootstrap_complete" },
+        { "name": "WHITELIST_CONFIRMED_PARAM", "value": "/mssp/whitelist_confirmed" },
+        { "name": "CMS_WHITELIST_IP", "value": "<NAT_EIP_OR_EMPTY>" },
+        { "name": "AWS_REGION", "value": "<REGION>" }
+      ],
+      "secrets": [
+        {
+          "name": "CMS_API_KEY",
+          "valueFrom": "<CMS_API_KEY_SECRET_ARN>"
+        },
+        {
+          "name": "CMS_API_SECRET",
+          "valueFrom": "<CMS_API_SECRET_SECRET_ARN>"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/mssp-pipeline",
+          "awslogs-region": "<REGION>",
+          "awslogs-stream-prefix": "bootstrap"
+        }
+      }
+    }
+  ]
+}

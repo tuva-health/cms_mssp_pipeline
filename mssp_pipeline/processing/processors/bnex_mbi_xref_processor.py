@@ -1,7 +1,11 @@
 from typing import List, Tuple
 
+import duckdb
+
 from .base import FileProcessor
+from ..exceptions import SourceDiscoveryError, is_empty_glob
 from ..defs.bnex_mbi_xref_file_defs import BNEXMBIXrefFileDef, BNEX_MBI_XREF_FILE_DEFS
+from ..sql import sql_string_literal
 
 
 class BNEXMBIXrefProcessor(FileProcessor):
@@ -21,10 +25,14 @@ class BNEXMBIXrefProcessor(FileProcessor):
         pattern = self._glob_pattern(file_def)
         try:
             rows = self.session.connection.execute(
-                f"SELECT * FROM glob('{pattern}')"
+                f"SELECT * FROM glob({sql_string_literal(pattern)})"
             ).fetchall()
-        except Exception:
-            return []
+        except duckdb.IOException as e:
+            if is_empty_glob(e):
+                return []
+            raise SourceDiscoveryError(
+                f"Could not list BNEX-MBI-XREF source files (pattern={pattern}): {e}"
+            ) from e
         return [(r[0], r[0]) for r in rows]
 
     def _build_query(self, file_def: BNEXMBIXrefFileDef, source_paths: List[str]) -> str:
@@ -58,5 +66,4 @@ class BNEXMBIXrefProcessor(FileProcessor):
 
 def _sql_path_list(paths: List[str]) -> str:
     """Format a list of file paths as a DuckDB list literal: ['path1', 'path2']."""
-    escaped = [p.replace("'", "''") for p in paths]
-    return "[" + ", ".join(f"'{p}'" for p in escaped) + "]"
+    return "[" + ", ".join(sql_string_literal(p) for p in paths) + "]"

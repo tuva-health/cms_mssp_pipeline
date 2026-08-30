@@ -116,3 +116,14 @@ def test_mssp_union_by_name(test_session, test_config, raw_dir):
     ).fetchone()[0]
 
     assert count == 2
+
+
+def test_mssp_handles_quotes_in_zip_paths(test_session, test_config, raw_dir):
+    make_mssp_zip(raw_dir, BEUR_DEF, BEUR_HEADERS, BEUR_ROWS, bundle_suffix="_Q'1")
+    _run_mssp(test_session, test_config)
+
+    count = test_session.connection.execute(
+        "SELECT COUNT(*) FROM raw_data.BEUR_BENEFICIARY_EXPENDITURE_UTILIZATION_REPORT"
+    ).fetchone()[0]
+
+    assert count == len(BEUR_ROWS)

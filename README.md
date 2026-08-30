@@ -79,7 +79,35 @@ uv run mssp-process
 
 # Full pipeline: download then process
 uv run mssp-pipeline
+
+# Validate configuration and local prerequisites
+uv run mssp-validate --target pipeline
 ```
+
+### AWS deployment guides
+
+- `docs/aws-staged-deployment-plan.md` — Foundation → Bootstrap → Activate rollout
+- `docs/aws-bootstrap-runbook.md` — operator checklist for whitelist + `config.txt` bootstrap
+- `docs/aws-ecs-container-contract.md` — ECS env/secret contract and container behavior
+- `docs/aws-iam-minimum-policies.md` — least-privilege baseline IAM templates
+- `infra/aws/ecs/taskdef-runtime.json` and `infra/aws/ecs/taskdef-bootstrap.json` — ECS task definition templates (x86_64)
+- `infra/terraform/aws/README.md` — Terraform skeleton usage for Foundation + Activate
+- `infra/clients/client.example/` — per-client overlay examples (`env.sh`, `*.tfvars`)
+- `scripts/check-client-config.sh` — validates AWS auth, required vars, and per-client tfvars before deploy
+- `scripts/build-and-push-image.sh` — builds and pushes linux/amd64 image to ECR for a client context; automatically installs backend extras based on `MSSP_OUTPUT_TYPE` (override with `PIP_EXTRAS`)
+- `scripts/deploy-client.sh` — wrapper to validate + apply foundation/activate and render/register ECS taskdefs; `activate` automatically resolves the latest active `mssp-pipeline-runtime` revision
+
+Recommended ECS rollout:
+
+```bash
+export IMAGE_TAG=2026-04-17-my-change
+scripts/build-and-push-image.sh <client> "$IMAGE_TAG"
+scripts/deploy-client.sh <client> render-taskdefs
+scripts/deploy-client.sh <client> register-taskdefs
+scripts/deploy-client.sh <client> activate
+```
+
+Use a fresh image tag when task definition wiring and container behavior change together (for example entrypoint/env/secret handling changes), then run a one-off smoke task before relying on the schedule.
 
 ---
 
@@ -119,6 +147,73 @@ Accepts all arguments from both commands above, plus:
 --download-dir DIR     Local intermediate directory for downloaded files before processing
 --skip-download        Skip the download phase (process only)
 --skip-process         Skip the processing phase (download only)
+--cleanup-download-dir Delete local download-dir after run (opt-in)
+--run-id ID            Optional run id for manifest file naming
+--resume-run-id ID     Resume from prior run (skip phases marked completed)
+--resume-latest        Resume from the newest manifest in --manifest-dir
+--manifest-dir DIR     Directory for run manifests (default: .runs)
+```
+
+### `mssp-validate`
+
+```
+--target download|process|pipeline
+                       Validate only one phase (default: pipeline)
+--cli-path PATH        Optional acoms-cli path override for download checks
+--format text|json     Human-readable or machine-readable output (default: text)
+--strict               Treat warnings as failures (non-zero exit)
+--live                 Perform live filesystem/credential checks when possible
+```
+
+`mssp-validate` warnings (non-fatal by default, fatal with `--strict`):
+
+- `MSSP_START_YEAR` is in the future (likely returns no files)
+- `MSSP_FILE_STORE` is a relative local path (works locally, less reliable for scheduled/CI runs)
+- Cloud `MSSP_OUTPUT_TYPE` with default `MSSP_TEMP_LOCATION=./STAGED` (recommend explicit staging path)
+- `MSSP_S3_BUCKET` and `MSSP_FILE_STORE` appear to point to different stores (legacy override may be confusing)
+
+Each pipeline run writes a manifest at `.runs/<run-id>.json` with phase status,
+errors, and event timestamps for auditability and resume support. At run end,
+the CLI also prints a one-line summary with run id, elapsed time, phase status,
+and event count.
+
+JSON output example (useful for scripts/automation):
+
+```bash
+uv run mssp-validate --target pipeline --format json --strict
+```
+
+```json
+{
+  "target": "pipeline",
+  "strict": true,
+  "live": false,
+  "ok": false,
+  "info": ["acoms-cli found: /path/to/bin/acoms-cli"],
+  "warnings": ["MSSP_FILE_STORE='downloads' is a relative path; use an absolute path for scheduled/CI runs"],
+  "errors": []
+}
+```
+
+### `mssp-runs`
+
+Inspect run manifests written by `mssp-pipeline`.
+
+```
+--manifest-dir DIR     Directory containing run manifests (default: .runs)
+--limit N              Max runs to list (newest first, default: 20)
+--run-id ID            Show details for a single run id
+--format text|json     Human-readable or machine-readable output (default: text)
+```
+
+Examples:
+
+```bash
+# List latest runs
+uv run mssp-runs
+
+# Inspect a specific run
+uv run mssp-runs --run-id 20260414T153000Z
 ```
 
 ### Environment variable overrides
@@ -251,6 +346,8 @@ SNOWFLAKE_RSA_KEY_PATH=~/.ssh/snowflake_rsa_key.p8
 SNOWFLAKE_RSA_KEY_PASSPHRASE=
 ```
 
+For ECS/ECR deployments, inject the private key via Secrets Manager/ECS Secrets and let `mssp-entrypoint` materialize `/tmp/snowflake_rsa_key.p8` at runtime instead of baking a key into the image. The secret may contain raw PEM text or base64-encoded PEM. `scripts/deploy-client.sh` renders Snowflake runtime tasks with `SNOWFLAKE_RSA_KEY` plus optional `SNOWFLAKE_RSA_KEY_PASSPHRASE`.
+
 #### `DATABRICKS`
 
 ```dotenv
@@ -312,7 +409,7 @@ The processing subsystem handles 8 MSSP ACO file types automatically. Files are 
 |---|---|---|---|
 | CCLF | Comprehensive Claim & Line Feed | Fixed-width text | 10+ `parta_*` / `partb_*` tables |
 | MSSP (ALR / BEUR / BAIP / NCBP) | Assignment and financial reports | CSV in zip | `AALR1_ASSIGNED_BENEFICIARIES`, `BEUR_*`, and others |
-| MCQM | Medicare Clinical Quality Measures | XLSX in zip | `MCQM_BENEFICIARIES`, `MCQM_DM_001SSP`, and others |
+| MCQM | Medicare Clinical Quality Measures | XLSX in zip through PY2025; CSV files in nested MCQM zip starting PY2026 | `MCQM_BENEFICIARIES`, `MCQM_DM_001SSP`, and others |
 | EXPU | Quarterly Expenditure & Utilization | XLSX | `EXPU_TABLE_1`, `EXPU_TABLE_2`, `EXPU_TABLE_3` |
 | BNEX | Beneficiary Nested Expenditure | CSV in zip | `BNEX_BENEFICIARY_NESTED_EXPENDITURE` |
 | BNEX MBI Xref | MBI cross-reference | CSV in zip | `BNEX_MBI_XREF` |
@@ -350,7 +447,7 @@ mssp_pipeline/
 
 **Shared environment config.** `.env` is loaded once and shared by both subsystems, so download and processing stay aligned on `MSSP_ACO_ID`, `MSSP_FILE_STORE`, and exporter credentials.
 
-**DuckDB for all I/O.** Files are read directly by DuckDB using community extensions (`zipfs` for zip-embedded CSVs, `rusty_sheet` for S3-hosted xlsx, `excel` for local xlsx). No Python-side parsing or temp file extraction.
+**DuckDB for all I/O.** Files are read directly by DuckDB using community extensions (`zipfs` for zip-embedded CSVs, `rusty_sheet` for S3-hosted xlsx, `excel` for local xlsx). No Python-side parsing or temp file extraction. In ECS/cloud-export runs, DuckDB temp spill is directed to local scratch via `MSSP_TEMP_LOCATION` (for example `/tmp/mssp-staging`).
 
 **Incremental by default.** Every backend tracks loaded `FILE_PATH` values. Re-running the pipeline after new files arrive appends only the new rows.
 
@@ -377,11 +474,20 @@ Tests use synthetic fixture data and mock all subprocess calls. Do not run tests
 
 ## Binary
 
-`bin/acoms-cli` is the CMS-provided CLI binary (~68 MB, macOS arm64). It is not committed to git by default. If you need to track it, use Git LFS:
+`bin/acoms-cli` is the CMS-provided CLI binary used locally. For container/AWS deployments, place the Linux x86_64 binary at `bin/acoms-cli-linux` (the Docker build copies it to `/app/bin/acoms-cli`).
+
+If you need to track binaries in git, use Git LFS:
 
 ```bash
 git lfs track "bin/acoms-cli"
-git add .gitattributes bin/acoms-cli
+git lfs track "bin/acoms-cli-linux"
+git add .gitattributes bin/acoms-cli bin/acoms-cli-linux
 ```
 
-The binary requires a `config.txt` file in the current working directory. Generate it once with `mssp-download --configure`. Do not commit `config.txt`.
+The CLI requires a `config.txt` file in the current working directory. Generate it once with `mssp-download --configure` (or use the AWS bootstrap flow that stores `config.txt` in Secrets Manager). Do not commit `config.txt`.
+
+Terraform working directories and local state should also stay out of git. `.gitignore` excludes:
+- `**/.terraform/`
+- `*.tfstate`
+- `*.tfstate.*`
+- Terraform crash logs

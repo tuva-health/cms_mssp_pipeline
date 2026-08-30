@@ -2,7 +2,7 @@ import os
 import boto3
 import redshift_connector
 
-from .base import normalize_identifier, normalize_query
+from .base import normalize_identifier, normalize_query, qualified_identifier, string_literal
 
 
 class RedshiftExporter:
@@ -47,7 +47,7 @@ class RedshiftExporter:
         is_incremental = (not self.full_refresh) and table_exists
 
         print(f"  Writing staging Parquet: {local_parquet}")
-        duckdb_connection.execute(f"COPY ({query}) TO '{local_parquet}' (FORMAT PARQUET)")
+        duckdb_connection.execute(f"COPY ({query}) TO {string_literal(local_parquet)} (FORMAT PARQUET)")
 
         if not is_incremental:
             self._create_table(table_name, duckdb_connection, query)
@@ -76,6 +76,10 @@ class RedshiftExporter:
             cursor.close()
             conn.close()
 
+    def get_missing_file_paths(self, table_name: str, candidate_file_paths: list[str], duckdb_connection) -> list[str]:
+        existing = set(self.get_existing_file_paths(table_name, duckdb_connection))
+        return [path for path in candidate_file_paths if path not in existing]
+
     def _connect(self):
         return redshift_connector.connect(
             host=self.rs_config.host,
@@ -86,7 +90,11 @@ class RedshiftExporter:
         )
 
     def _table_ref(self, table_name: str) -> str:
-        return f"{self.rs_config.schema}.{table_name}"
+        return qualified_identifier(
+            normalize_identifier(self.rs_config.schema),
+            table_name,
+            field_name="table reference",
+        )
 
     def _redshift_table_exists(self, table_name: str) -> bool:
         """Returns True if the target table already exists in Redshift."""
@@ -95,8 +103,8 @@ class RedshiftExporter:
         try:
             cursor.execute(f"""
                 SELECT COUNT(*) FROM information_schema.tables
-                WHERE table_schema = '{self.rs_config.schema}'
-                  AND table_name   = '{table_name}'
+                WHERE table_schema = {string_literal(normalize_identifier(self.rs_config.schema))}
+                  AND table_name   = {string_literal(table_name)}
             """)
             return cursor.fetchone()[0] > 0
         finally:
@@ -126,7 +134,7 @@ class RedshiftExporter:
         cols = duckdb_connection.execute(
             f"DESCRIBE SELECT * FROM ({query}) AS q"
         ).fetchall()
-        col_defs = ", ".join([f"{c[0]} VARCHAR" for c in cols])
+        col_defs = ", ".join([f"{normalize_identifier(c[0])} VARCHAR" for c in cols])
         table_ref = self._table_ref(table_name)
         conn = self._connect()
         cursor = conn.cursor()
@@ -138,6 +146,7 @@ class RedshiftExporter:
         except Exception as e:
             print(f"  Error creating table {table_name}: {e}")
             conn.rollback()
+            raise
         finally:
             cursor.close()
             conn.close()
@@ -151,8 +160,8 @@ class RedshiftExporter:
             print(f"  Loading into {table_ref}...")
             cursor.execute(f"""
                 COPY {table_ref}
-                FROM '{s3_uri}'
-                IAM_ROLE '{self.rs_config.iam_role}'
+                FROM {string_literal(s3_uri)}
+                IAM_ROLE {string_literal(self.rs_config.iam_role)}
                 FORMAT AS PARQUET
             """)
             conn.commit()
@@ -160,6 +169,7 @@ class RedshiftExporter:
         except Exception as e:
             print(f"  Error loading {table_name} to Redshift: {e}")
             conn.rollback()
+            raise
         finally:
             cursor.close()
             conn.close()

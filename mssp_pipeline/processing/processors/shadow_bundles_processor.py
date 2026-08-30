@@ -1,7 +1,11 @@
 from typing import List, Tuple
 
+import duckdb
+
 from .base import FileProcessor
+from ..exceptions import SourceDiscoveryError, is_empty_glob
 from ..defs.shadow_bundles_defs import ShadowBundleFileDef, SHADOW_BUNDLES_FILE_DEFS
+from ..sql import sql_string_literal, validate_identifier
 
 
 class ShadowBundlesProcessor(FileProcessor):
@@ -32,10 +36,14 @@ class ShadowBundlesProcessor(FileProcessor):
         pattern = self._glob_pattern(file_def)
         try:
             rows = self.session.connection.execute(
-                f"SELECT * FROM glob('{pattern}')"
+                f"SELECT * FROM glob({sql_string_literal(pattern)})"
             ).fetchall()
-        except Exception:
-            return []
+        except duckdb.IOException as e:
+            if is_empty_glob(e):
+                return []
+            raise SourceDiscoveryError(
+                f"Could not list shadow bundles source files (pattern={pattern}): {e}"
+            ) from e
         return [(r[0], r[0]) for r in rows]
 
     def _build_query(self, file_def: ShadowBundleFileDef, source_paths: List[str]) -> str:
@@ -52,7 +60,10 @@ class ShadowBundlesProcessor(FileProcessor):
                 ignore_errors=true)
         """).fetchall()
 
-        select_clause = ", ".join([f"{c[0]} AS {c[0].upper()}" for c in cols])
+        select_clause = ", ".join([
+            f"{validate_identifier(c[0], field_name='column name')} AS {validate_identifier(c[0].upper(), field_name='column alias')}"
+            for c in cols
+        ])
 
         return f"""
             SELECT
@@ -70,5 +81,4 @@ class ShadowBundlesProcessor(FileProcessor):
 
 def _sql_path_list(paths: List[str]) -> str:
     """Format a list of file paths as a DuckDB list literal: ['path1', 'path2']."""
-    escaped = [p.replace("'", "''") for p in paths]
-    return "[" + ", ".join(f"'{p}'" for p in escaped) + "]"
+    return "[" + ", ".join(sql_string_literal(p) for p in paths) + "]"

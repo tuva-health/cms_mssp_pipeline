@@ -1,7 +1,7 @@
 import os
 from databricks import sql as databricks_sql
 
-from .base import normalize_identifier, normalize_query
+from .base import normalize_identifier, normalize_query, qualified_identifier, string_literal
 
 
 class DatabricksExporter:
@@ -80,14 +80,18 @@ class DatabricksExporter:
             cursor.close()
             conn.close()
 
+    def get_missing_file_paths(self, table_name: str, candidate_file_paths: list[str], duckdb_connection) -> list[str]:
+        existing = set(self.get_existing_file_paths(table_name, duckdb_connection))
+        return [path for path in candidate_file_paths if path not in existing]
+
     def _write_staging(self, duckdb_connection, query, local_parquet, final_parquet):
         """Write staging Parquet — directly to cloud, or locally before DBFS upload."""
         if local_parquet is None:
             print(f"  Writing staging Parquet: {final_parquet}")
-            duckdb_connection.execute(f"COPY ({query}) TO '{final_parquet}' (FORMAT PARQUET)")
+            duckdb_connection.execute(f"COPY ({query}) TO {string_literal(final_parquet)} (FORMAT PARQUET)")
         else:
             print(f"  Writing staging Parquet: {local_parquet}")
-            duckdb_connection.execute(f"COPY ({query}) TO '{local_parquet}' (FORMAT PARQUET)")
+            duckdb_connection.execute(f"COPY ({query}) TO {string_literal(local_parquet)} (FORMAT PARQUET)")
             self._dbfs_upload(local_parquet, final_parquet)
 
     def _connect(self):
@@ -99,13 +103,27 @@ class DatabricksExporter:
 
     def _table_ref(self, table_name: str) -> str:
         if self.db_config.catalog:
-            return f"`{self.db_config.catalog}`.`{self.db_config.schema}`.`{table_name}`"
-        return f"`{self.db_config.schema}`.`{table_name}`"
+            return qualified_identifier(
+                normalize_identifier(self.db_config.catalog),
+                normalize_identifier(self.db_config.schema),
+                table_name,
+                field_name="table reference",
+            )
+        return qualified_identifier(
+            normalize_identifier(self.db_config.schema),
+            table_name,
+            field_name="table reference",
+        )
 
     def _databricks_table_exists(self, table_name: str) -> bool:
         """Returns True if the target table already exists in Databricks."""
         if self.db_config.catalog:
-            info_schema = f"`{self.db_config.catalog}`.information_schema.tables"
+            info_schema = qualified_identifier(
+                normalize_identifier(self.db_config.catalog),
+                "information_schema",
+                "tables",
+                field_name="information schema reference",
+            )
         else:
             info_schema = "information_schema.tables"
         conn = self._connect()
@@ -113,8 +131,8 @@ class DatabricksExporter:
         try:
             cursor.execute(f"""
                 SELECT COUNT(*) FROM {info_schema}
-                WHERE table_schema = '{self.db_config.schema}'
-                  AND table_name = '{table_name}'
+                WHERE table_schema = {string_literal(normalize_identifier(self.db_config.schema))}
+                  AND table_name = {string_literal(table_name)}
             """)
             return cursor.fetchone()[0] > 0
         finally:
@@ -143,11 +161,12 @@ class DatabricksExporter:
             cursor.execute(f"""
                 CREATE TABLE {table_ref}
                 USING DELTA
-                AS SELECT * FROM parquet.`{staging_parquet}`
+                AS SELECT * FROM parquet.{string_literal(staging_parquet)}
             """)
             print(f"✅ Successfully loaded {table_ref}")
         except Exception as e:
             print(f"  Error loading {table_name} to Databricks: {e}")
+            raise
         finally:
             cursor.close()
             conn.close()
@@ -161,12 +180,13 @@ class DatabricksExporter:
             print(f"  Appending into {table_ref}...")
             cursor.execute(f"""
                 COPY INTO {table_ref}
-                FROM parquet.`{staging_parquet}`
+                FROM parquet.{string_literal(staging_parquet)}
                 FILEFORMAT = PARQUET
             """)
             print(f"✅ Successfully appended to {table_ref}")
         except Exception as e:
             print(f"  Error appending {table_name} to Databricks: {e}")
+            raise
         finally:
             cursor.close()
             conn.close()

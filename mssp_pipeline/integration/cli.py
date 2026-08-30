@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -14,27 +15,54 @@ _MAX_RETRIES = 3
 _RETRY_DELAY = 10   # seconds between retry attempts for connection errors
 _GATEWAY_RETRY_DELAY = 60  # seconds to wait after a 502 gateway error
 _REQUEST_DELAY = 3  # seconds to pause after every successful CLI call
+_DEFAULT_TIMEOUT = 1800  # seconds; cap any single acoms-cli invocation
 
 
 class CLIError(Exception):
     pass
 
 
+def _cli_timeout() -> int:
+    raw = os.environ.get("MSSP_ACOMS_CLI_TIMEOUT", "").strip()
+    if not raw:
+        return _DEFAULT_TIMEOUT
+    try:
+        value = int(raw)
+    except ValueError:
+        return _DEFAULT_TIMEOUT
+    return value if value > 0 else _DEFAULT_TIMEOUT
+
+
 def run_cmd(cli_path: Path, args: list[str], cwd: Path | None = None) -> str:
     """Run acoms-cli with the given arguments and return stdout as a string.
 
-    Retries up to _MAX_RETRIES times on transient network errors (e.g. ECONNRESET)
-    and gateway errors (502), using a longer back-off for the latter.
+    Retries up to _MAX_RETRIES times on transient network errors (e.g. ECONNRESET),
+    gateway errors (502), and subprocess timeouts. Each invocation is bounded by
+    MSSP_ACOMS_CLI_TIMEOUT seconds (default 1800) so a hung CLI cannot stall the
+    pipeline indefinitely.
     """
     cmd = [str(cli_path)] + args
+    timeout = _cli_timeout()
     last_error: CLIError | None = None
     for attempt in range(1, _MAX_RETRIES + 1):
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            cwd=str(cwd) if cwd else None,
-        )
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                cwd=str(cwd) if cwd else None,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            error = CLIError(
+                f"acoms-cli exceeded MSSP_ACOMS_CLI_TIMEOUT={timeout}s: {' '.join(cmd)}"
+            )
+            if attempt < _MAX_RETRIES:
+                print(f"  Timeout after {timeout}s; retrying in {_RETRY_DELAY}s (attempt {attempt}/{_MAX_RETRIES})...")
+                time.sleep(_RETRY_DELAY)
+                last_error = error
+                continue
+            raise error from exc
         if result.returncode == 0:
             time.sleep(_REQUEST_DELAY)
             return result.stdout

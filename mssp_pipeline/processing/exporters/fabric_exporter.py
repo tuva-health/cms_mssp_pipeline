@@ -1,6 +1,6 @@
 import os
 
-from .base import normalize_identifier, normalize_query
+from .base import normalize_identifier, normalize_query, string_literal
 
 
 class FabricExporter:
@@ -49,7 +49,7 @@ class FabricExporter:
         is_incremental = (not self.full_refresh) and table_exists
 
         print(f"  Writing staging Parquet: {local_parquet}")
-        duckdb_connection.execute(f"COPY ({query}) TO '{local_parquet}' (FORMAT PARQUET)")
+        duckdb_connection.execute(f"COPY ({query}) TO {string_literal(local_parquet)} (FORMAT PARQUET)")
 
         if is_incremental:
             self._write_delta(local_parquet, table_name, mode='append')
@@ -76,6 +76,10 @@ class FabricExporter:
             if "not a delta table" in str(e).lower() or "does not exist" in str(e).lower():
                 return []
             raise
+
+    def get_missing_file_paths(self, table_name: str, candidate_file_paths: list[str], duckdb_connection) -> list[str]:
+        existing = set(self.get_existing_file_paths(table_name, duckdb_connection))
+        return [path for path in candidate_file_paths if path not in existing]
 
     def _table_path(self, table_name: str) -> str:
         return f"{self.fabric_config.onelake_path.rstrip('/')}/{table_name}"
@@ -126,3 +130,4 @@ class FabricExporter:
             print(f"✅ Successfully {action_done} {table_path}")
         except Exception as e:
             print(f"  Error writing {table_name} to Fabric Lakehouse: {e}")
+            raise

@@ -1,7 +1,6 @@
 """Processing subpackage: ETL pipeline for MSSP ACO files via DuckDB."""
 
 import shutil
-import sys
 from pathlib import Path
 
 
@@ -55,13 +54,14 @@ def run(config=None) -> None:
     from mssp_pipeline.processing.processors.bnex_mbi_xref_processor import BNEXMBIXrefProcessor
     from mssp_pipeline.processing.processors.expu_processor import EXPUProcessor
 
+    from mssp_pipeline.processing.exceptions import ProcessingStartupError
+
     try:
         validate_config(config)
         session = DuckDBSession(config)
         exporter = build_exporter(config)
     except Exception as e:
-        print(f"Startup error: {e}")
-        sys.exit(1)
+        raise ProcessingStartupError(f"Startup error: {e}") from e
 
     try:
         CCLFProcessor(session, exporter, config).run()

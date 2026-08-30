@@ -2,8 +2,12 @@ import re
 from datetime import date, timedelta
 from typing import List, Optional, Tuple
 
+import duckdb
+
 from .base import FileProcessor
+from ..exceptions import SourceDiscoveryError, is_empty_glob
 from ..defs.expu_file_defs import EXPUFileDef, EXPU_FILE_DEFS
+from ..sql import sql_string_literal, validate_identifier
 
 
 class EXPUProcessor(FileProcessor):
@@ -54,10 +58,14 @@ class EXPUProcessor(FileProcessor):
         )
         try:
             rows = self.session.connection.execute(
-                f"SELECT * FROM glob('{pattern}')"
+                f"SELECT * FROM glob({sql_string_literal(pattern)})"
             ).fetchall()
-        except Exception:
-            return []
+        except duckdb.IOException as e:
+            if is_empty_glob(e):
+                return []
+            raise SourceDiscoveryError(
+                f"Could not list EXPU source files (pattern={pattern}): {e}"
+            ) from e
         return sorted(r[0] for r in rows)
 
     def _quarter_end_date(self, filename: str) -> Optional[date]:
@@ -75,8 +83,8 @@ class EXPUProcessor(FileProcessor):
         """Return the exact sheet name matching sheet_prefix, or None if not found."""
         row = self.session.connection.execute(f"""
             SELECT DISTINCT sheet_name
-            FROM read_sheets(['{xlsx_path}'], sheet_name_column='sheet_name')
-            WHERE sheet_name LIKE '{sheet_prefix}%'
+            FROM read_sheets([{sql_string_literal(xlsx_path)}], sheet_name_column='sheet_name')
+            WHERE sheet_name LIKE {sql_string_literal(f'{sheet_prefix}%')}
             LIMIT 1
         """).fetchone()
         return row[0] if row else None
@@ -130,12 +138,12 @@ class EXPUProcessor(FileProcessor):
 
             selects.append(f"""
                 SELECT * EXCLUDE (sheet_name, filename),
-                       '{xlsx_path}'  AS FILE_PATH,
-                       '{dir_name}'   AS DIRECTORY_NAME,
-                       '{file_name}'  AS FILE_NAME,
+                       {sql_string_literal(xlsx_path)} AS FILE_PATH,
+                       {sql_string_literal(dir_name)}  AS DIRECTORY_NAME,
+                       {sql_string_literal(file_name)} AS FILE_NAME,
                        {file_date_sql} AS FILE_DATE,
-                       '{period}'     AS PERIOD
-                FROM read_sheets(['{xlsx_path}'], sheets=['{exact_sheet}'],
+                       {sql_string_literal(period)}    AS PERIOD
+                FROM read_sheets([{sql_string_literal(xlsx_path)}], sheets=[{sql_string_literal(exact_sheet)}],
                                  header=false, skip_empty_rows=false,
                                  file_name_column='filename',
                                  sheet_name_column='sheet_name')
@@ -174,11 +182,11 @@ class EXPUProcessor(FileProcessor):
                 SELECT * EXCLUDE (_rn, _section_flag, _group_id, sheet_name, filename),
                        FIRST_VALUE(_section_flag IGNORE NULLS)
                            OVER (PARTITION BY _group_id ORDER BY _rn) AS SECTION,
-                       '{xlsx_path}'  AS FILE_PATH,
-                       '{dir_name}'   AS DIRECTORY_NAME,
-                       '{file_name}'  AS FILE_NAME,
+                       {sql_string_literal(xlsx_path)} AS FILE_PATH,
+                       {sql_string_literal(dir_name)}  AS DIRECTORY_NAME,
+                       {sql_string_literal(file_name)} AS FILE_NAME,
                        {file_date_sql} AS FILE_DATE,
-                       '{period}'     AS PERIOD
+                       {sql_string_literal(period)}    AS PERIOD
                 FROM (
                     SELECT *,
                            CASE WHEN {_is_header}
@@ -189,7 +197,7 @@ class EXPUProcessor(FileProcessor):
                                ) AS _group_id
                     FROM (
                         SELECT ROW_NUMBER() OVER () AS _rn, *
-                        FROM read_sheets(['{xlsx_path}'], sheets=['{exact_sheet}'],
+                        FROM read_sheets([{sql_string_literal(xlsx_path)}], sheets=[{sql_string_literal(exact_sheet)}],
                                          header=false, skip_empty_rows=false,
                                          file_name_column='filename',
                                          sheet_name_column='sheet_name')
@@ -223,11 +231,11 @@ class EXPUProcessor(FileProcessor):
             _, dir_name, file_name, period, file_date_sql = self._file_metadata(xlsx_path)
 
             # Load the sheet with row numbers into a temp table
-            tmp = f"_expu_t2_raw_{i}"
+            tmp = validate_identifier(f"_expu_t2_raw_{i}", field_name="temp table name")
             conn.execute(f"""
                 CREATE OR REPLACE TEMP TABLE {tmp} AS
                 SELECT ROW_NUMBER() OVER () AS _rn, *
-                FROM read_sheets(['{xlsx_path}'], sheets=['{exact_sheet}'],
+                FROM read_sheets([{sql_string_literal(xlsx_path)}], sheets=[{sql_string_literal(exact_sheet)}],
                                  header=false, skip_empty_rows=false,
                                  file_name_column='filename',
                                  sheet_name_column='sheet_name')
@@ -235,7 +243,8 @@ class EXPUProcessor(FileProcessor):
 
             # Determine period value columns (all except _rn, A, filename, sheet_name)
             col_names = [
-                r[0] for r in conn.execute(f"DESCRIBE {tmp}").fetchall()
+                validate_identifier(r[0], field_name="column name")
+                for r in conn.execute(f"DESCRIBE {tmp}").fetchall()
                 if r[0] not in ("_rn", "A", "filename", "sheet_name")
             ]
             if not col_names:
@@ -248,16 +257,16 @@ class EXPUProcessor(FileProcessor):
 
             # Build one SELECT per period column (data rows only: _rn > 7)
             for col, label in zip(col_names, header_vals):
-                label_safe = str(label).replace("'", "''") if label is not None else col
+                label_value = str(label) if label is not None else col
                 all_parts.append(f"""
                     SELECT CAST(A AS VARCHAR)       AS A,
-                           '{label_safe}'           AS PERIOD_COLUMN,
+                           {sql_string_literal(label_value)} AS PERIOD_COLUMN,
                            CAST({col} AS VARCHAR)   AS VALUE,
-                           '{xlsx_path}'            AS FILE_PATH,
-                           '{dir_name}'             AS DIRECTORY_NAME,
-                           '{file_name}'            AS FILE_NAME,
+                           {sql_string_literal(xlsx_path)} AS FILE_PATH,
+                           {sql_string_literal(dir_name)}  AS DIRECTORY_NAME,
+                           {sql_string_literal(file_name)} AS FILE_NAME,
                            {file_date_sql}          AS FILE_DATE,
-                           '{period}'               AS PERIOD
+                           {sql_string_literal(period)}    AS PERIOD
                     FROM {tmp}
                     WHERE _rn > 7
                 """)
@@ -267,8 +276,9 @@ class EXPUProcessor(FileProcessor):
                 f"Sheet prefix '{file_def.sheet_prefix}' not found in any EXPU xlsx"
             )
 
+        temp_table = validate_identifier("_expu_t2_unpivoted", field_name="temp table name")
         conn.execute(f"""
-            CREATE OR REPLACE TEMP TABLE _expu_t2_unpivoted AS
+            CREATE OR REPLACE TEMP TABLE {temp_table} AS
             {' UNION ALL '.join(all_parts)}
         """)
-        return "SELECT * FROM _expu_t2_unpivoted"
+        return f"SELECT * FROM {temp_table}"

@@ -4,9 +4,13 @@ state.json
 
 # Downloaded/extracted source files
 downloads/
+reference/
 
 # Processing staging directory
 STAGED/
+
+# Pipeline run manifests
+.runs/
 
 # Python
 __pycache__/
@@ -25,8 +29,27 @@ uv.lock
 .env
 .envrc.local
 
+# Client deployment overlays (keep only examples in git)
+infra/clients/*
+!infra/clients/client.example/
+!infra/clients/client.example/**
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
 # Editor
 .DS_Store
 .idea/
 .vscode/
-.claude
+.claude/*
+!.claude/CLAUDE.md
+
+# Binaries — large CMS-provided executables
+# Track explicit files to avoid accidentally committing other binaries
+bin/*
+!bin/acoms-cli
+!bin/acoms-cli-linux

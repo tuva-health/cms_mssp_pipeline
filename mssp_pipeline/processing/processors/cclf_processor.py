@@ -1,7 +1,11 @@
 from typing import List, Tuple
 
+import duckdb
+
 from .base import FileProcessor
+from ..exceptions import SourceDiscoveryError, is_empty_glob
 from ..defs.cclf_file_defs import CCLFFileDef, CCLF_FILE_DEFS
+from ..sql import sql_string_literal
 
 
 class CCLFProcessor(FileProcessor):
@@ -31,10 +35,14 @@ class CCLFProcessor(FileProcessor):
         pattern = self._match_pattern(file_def)
         try:
             rows = self.session.connection.execute(
-                f"SELECT * FROM glob('{pattern}')"
+                f"SELECT * FROM glob({sql_string_literal(pattern)})"
             ).fetchall()
-        except Exception:
-            return []
+        except duckdb.IOException as e:
+            if is_empty_glob(e):
+                return []
+            raise SourceDiscoveryError(
+                f"Could not list CCLF source files (pattern={pattern}): {e}"
+            ) from e
         # FILE_PATH == source_path for plain (non-zip) files.
         return [(r[0], r[0]) for r in rows]
 
@@ -71,5 +79,4 @@ class CCLFProcessor(FileProcessor):
 
 def _sql_path_list(paths: List[str]) -> str:
     """Format a list of file paths as a DuckDB list literal: ['path1', 'path2']."""
-    escaped = [p.replace("'", "''") for p in paths]
-    return "[" + ", ".join(f"'{p}'" for p in escaped) + "]"
+    return "[" + ", ".join(sql_string_literal(p) for p in paths) + "]"

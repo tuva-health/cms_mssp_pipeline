@@ -1,9 +1,19 @@
 from typing import Protocol, runtime_checkable
 
+from ..sql import join_identifiers, sql_string_literal, validate_identifier
+
 
 def normalize_identifier(name: str) -> str:
     """Normalize a table or column name to lowercase for cross-warehouse consistency."""
-    return name.lower()
+    return validate_identifier(name.lower(), field_name="identifier")
+
+
+def qualified_identifier(*parts: str, field_name: str = "identifier") -> str:
+    return join_identifiers(*parts, field_name=field_name)
+
+
+def string_literal(value: str) -> str:
+    return sql_string_literal(value)
 
 
 def normalize_query(query: str, conn) -> str:
@@ -41,15 +51,16 @@ class Exporter(Protocol):
         """
         ...
 
-    def get_existing_file_paths(self, table_name: str, duckdb_connection) -> list:
+    def get_missing_file_paths(self, table_name: str, candidate_file_paths: list[str], duckdb_connection) -> list[str]:
         """
-        Return the list of FILE_PATH values already persisted in the destination.
+        Return only the candidate FILE_PATH values not yet persisted in the destination.
 
-        Returns an empty list if the table/file does not yet exist.
-        Called by FileProcessor.run() to determine which source files are new.
+        Called by FileProcessor.run() batch-by-batch so exporters can perform
+        bounded existence checks against the destination backend.
 
         Args:
             table_name:        Logical table name.
+            candidate_file_paths: FILE_PATH values from the current processor batch.
             duckdb_connection: An active duckdb.DuckDBPyConnection.
         """
         ...

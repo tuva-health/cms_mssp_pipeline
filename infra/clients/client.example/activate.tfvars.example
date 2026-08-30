@@ -1,0 +1,25 @@
+region              = "us-east-1"
+project_name        = "mssp-pipeline"
+schedule_expression = "cron(0 6 * * ? *)"
+enable_schedule     = true
+process_schedule_expression = "cron(30 6 * * ? *)"
+enable_process_schedule     = false
+process_database            = ""
+process_schema              = "RAW_DATA"
+
+# Read network + ECS placement defaults from foundation remote state
+# - Use "local" if activate runs from same repo/workdir as foundation
+# - Use "s3" for shared CI/CD remote state
+foundation_state_backend    = "local"
+foundation_state_local_path = "../foundation/terraform.tfstate"
+
+# runtime_task_definition_arn is optional when using scripts/deploy-client.sh,
+# which will resolve the latest active mssp-pipeline-runtime revision at apply time.
+# Set it only if you want to pin activate to a specific revision manually.
+# runtime_task_definition_arn = "<runtime-task-definition-arn>"
+
+# Optional manual overrides (normally leave unset to use foundation outputs)
+# events_invoke_role_arn = "<eventbridge-invoke-ecs-role-arn>"
+# ecs_cluster_arn = "<ecs-cluster-arn>"
+# ecs_subnet_ids = ["subnet-0123456789abcdef0", "subnet-0fedcba9876543210"]
+# ecs_security_group_ids = ["sg-0123456789abcdef0"]

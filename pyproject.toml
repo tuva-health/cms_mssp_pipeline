@@ -21,6 +21,8 @@ dependencies = [
 mssp-download = "mssp_pipeline.__main__:download_main"
 mssp-process  = "mssp_pipeline.__main__:process_main"
 mssp-pipeline = "mssp_pipeline.__main__:pipeline_main"
+mssp-validate = "mssp_pipeline.__main__:validate_main"
+mssp-runs     = "mssp_pipeline.__main__:runs_main"
 
 [project.optional-dependencies]
 # Core DuckDB processing engine (required for mssp-process / mssp-pipeline)
@@ -81,6 +83,12 @@ dev = [
     "azure-identity",
     "azure-storage-blob",
     "google-cloud-storage",
+    # The Snowflake exporter's tests import the connector directly. Production
+    # still imports it lazily in build_exporter, so a minimal install needs no
+    # cloud SDKs; the test suite does.
+    "snowflake-connector-python",
+    "cryptography",
+    "keyring",
 ]
 
 [tool.hatch.build.targets.wheel]

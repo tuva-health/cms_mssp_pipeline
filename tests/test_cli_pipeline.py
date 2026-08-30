@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import json
+import os
 import sys
 import types
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from mssp_pipeline import __main__ as cli
 from mssp_pipeline.pipeline import run as pipeline_run
+from mssp_pipeline.run_manifest import RunManifest
 
 
 def _install_fake_dotenv(monkeypatch):
@@ -14,6 +19,9 @@ def _install_fake_dotenv(monkeypatch):
     fake.load_dotenv = lambda: None
     monkeypatch.setitem(sys.modules, "dotenv", fake)
     sys.modules.pop("mssp_pipeline.config", None)
+    pkg = sys.modules.get("mssp_pipeline")
+    if pkg is not None and hasattr(pkg, "config"):
+        delattr(pkg, "config")
 
 
 def test_download_main_uses_file_store_override(monkeypatch, tmp_path):
@@ -87,3 +95,283 @@ def test_pipeline_run_passes_remote_store_to_processing(tmp_path):
         )
 
     assert process_run.call_args.args[0].FILE_STORE == "az://container/base"
+
+
+def test_pipeline_main_forwards_cleanup_flag(monkeypatch):
+    _install_fake_dotenv(monkeypatch)
+    monkeypatch.setattr(cli, "_check_config_file", lambda: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "mssp-pipeline",
+            "--aco",
+            "C1234",
+            "--start-year",
+            "2025",
+            "--cleanup-download-dir",
+            "--skip-process",
+        ],
+    )
+
+    with patch("mssp_pipeline.pipeline.run") as pipeline_run_mock:
+        cli.pipeline_main()
+
+    assert pipeline_run_mock.call_args.kwargs["cleanup_download_dir"] is True
+
+
+def test_pipeline_main_validates_processing_config(monkeypatch):
+    _install_fake_dotenv(monkeypatch)
+    monkeypatch.setenv("MSSP_OUTPUT_TYPE", "SNOWFLAKE")
+    monkeypatch.setattr(cli, "_check_config_file", lambda: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "mssp-pipeline",
+            "--aco",
+            "C1234",
+            "--start-year",
+            "2025",
+            "--skip-download",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        cli.pipeline_main()
+
+
+def test_validate_main_process_target_success(monkeypatch, tmp_path):
+    _install_fake_dotenv(monkeypatch)
+    monkeypatch.setenv("MSSP_ACO_ID", "C1234")
+    monkeypatch.setenv("MSSP_FILE_STORE", str(tmp_path / "downloads"))
+    monkeypatch.setenv("MSSP_OUTPUT_TYPE", "PARQUET")
+    monkeypatch.setenv("MSSP_OUTPUT_LOCATION", str(tmp_path / "out"))
+    sys.modules.pop("mssp_pipeline.config", None)
+
+    monkeypatch.setattr(sys, "argv", ["mssp-validate", "--target", "process"])
+    cli.validate_main()
+
+
+def test_validate_main_process_target_fails_missing_aco(monkeypatch, tmp_path):
+    _install_fake_dotenv(monkeypatch)
+    monkeypatch.delenv("MSSP_ACO_ID", raising=False)
+    monkeypatch.setenv("MSSP_FILE_STORE", str(tmp_path / "downloads"))
+    monkeypatch.setenv("MSSP_OUTPUT_TYPE", "PARQUET")
+    monkeypatch.setenv("MSSP_OUTPUT_LOCATION", str(tmp_path / "out"))
+    sys.modules.pop("mssp_pipeline.config", None)
+
+    monkeypatch.setattr(sys, "argv", ["mssp-validate", "--target", "process"])
+    with pytest.raises(SystemExit):
+        cli.validate_main()
+
+
+def test_validate_main_json_output(monkeypatch, tmp_path, capsys):
+    _install_fake_dotenv(monkeypatch)
+    monkeypatch.setenv("MSSP_ACO_ID", "C1234")
+    monkeypatch.setenv("MSSP_FILE_STORE", str(tmp_path / "downloads"))
+    monkeypatch.setenv("MSSP_OUTPUT_TYPE", "PARQUET")
+    monkeypatch.setenv("MSSP_OUTPUT_LOCATION", str(tmp_path / "out"))
+    sys.modules.pop("mssp_pipeline.config", None)
+
+    monkeypatch.setattr(sys, "argv", ["mssp-validate", "--target", "process", "--format", "json"])
+    cli.validate_main()
+    out = capsys.readouterr().out
+    payload = json.loads(out)
+    assert payload["ok"] is True
+    assert payload["target"] == "process"
+    assert payload["strict"] is False
+    assert payload["warnings"] == []
+    assert payload["errors"] == []
+
+
+def test_validate_main_strict_fails_on_warning(monkeypatch, tmp_path):
+    _install_fake_dotenv(monkeypatch)
+    monkeypatch.setenv("MSSP_ACO_ID", "C1234")
+    monkeypatch.setenv("MSSP_FILE_STORE", "downloads")  # relative path -> warning
+    monkeypatch.setenv("MSSP_OUTPUT_TYPE", "PARQUET")
+    monkeypatch.setenv("MSSP_OUTPUT_LOCATION", str(tmp_path / "out"))
+    sys.modules.pop("mssp_pipeline.config", None)
+
+    monkeypatch.setattr(sys, "argv", ["mssp-validate", "--target", "process", "--strict"])
+    with pytest.raises(SystemExit):
+        cli.validate_main()
+
+
+def test_pipeline_main_resume_latest(monkeypatch, tmp_path):
+    _install_fake_dotenv(monkeypatch)
+    monkeypatch.setattr(cli, "_check_config_file", lambda: None)
+
+    manifest_dir = tmp_path / ".runs"
+    older = RunManifest("older", manifest_dir=manifest_dir)
+    older.save()
+    newer = RunManifest("newer", manifest_dir=manifest_dir)
+    newer.save()
+    os.utime(older.path, (older.path.stat().st_atime - 10, older.path.stat().st_mtime - 10))
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "mssp-pipeline",
+            "--aco",
+            "C1234",
+            "--start-year",
+            "2025",
+            "--resume-latest",
+            "--manifest-dir",
+            str(manifest_dir),
+            "--skip-process",
+        ],
+    )
+
+    with patch("mssp_pipeline.pipeline.run") as pipeline_run_mock:
+        cli.pipeline_main()
+
+    assert pipeline_run_mock.call_args.kwargs["resume_run_id"] == "newer"
+
+
+def test_pipeline_main_resume_latest_ignores_invalid_manifest_names(monkeypatch, tmp_path):
+    _install_fake_dotenv(monkeypatch)
+    monkeypatch.setattr(cli, "_check_config_file", lambda: None)
+
+    manifest_dir = tmp_path / ".runs"
+    valid = RunManifest("valid-run", manifest_dir=manifest_dir)
+    valid.save()
+    (manifest_dir / "../../escape.json").parent.mkdir(parents=True, exist_ok=True)
+    (manifest_dir / "bad id.json").write_text("{}")
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "mssp-pipeline",
+            "--aco",
+            "C1234",
+            "--start-year",
+            "2025",
+            "--resume-latest",
+            "--manifest-dir",
+            str(manifest_dir),
+            "--skip-process",
+        ],
+    )
+
+    with patch("mssp_pipeline.pipeline.run") as pipeline_run_mock:
+        cli.pipeline_main()
+
+    assert pipeline_run_mock.call_args.kwargs["resume_run_id"] == "valid-run"
+
+
+def test_pipeline_main_resume_latest_missing_manifest(monkeypatch, tmp_path):
+    _install_fake_dotenv(monkeypatch)
+    monkeypatch.setattr(cli, "_check_config_file", lambda: None)
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "mssp-pipeline",
+            "--aco",
+            "C1234",
+            "--start-year",
+            "2025",
+            "--resume-latest",
+            "--manifest-dir",
+            str(tmp_path / "empty_runs"),
+            "--skip-process",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        cli.pipeline_main()
+
+
+def test_pipeline_main_rejects_invalid_run_id(monkeypatch, capsys):
+    _install_fake_dotenv(monkeypatch)
+    monkeypatch.setattr(cli, "_check_config_file", lambda: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "mssp-pipeline",
+            "--aco",
+            "C1234",
+            "--start-year",
+            "2025",
+            "--run-id",
+            "../../escape",
+            "--skip-process",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        cli.pipeline_main()
+
+    assert "Invalid run id" in capsys.readouterr().out
+
+
+def test_pipeline_main_rejects_invalid_resume_run_id(monkeypatch, capsys):
+    _install_fake_dotenv(monkeypatch)
+    monkeypatch.setattr(cli, "_check_config_file", lambda: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "mssp-pipeline",
+            "--aco",
+            "C1234",
+            "--start-year",
+            "2025",
+            "--resume-run-id",
+            "bad/id",
+            "--skip-process",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        cli.pipeline_main()
+
+    assert "Invalid run id" in capsys.readouterr().out
+
+
+def test_runs_main_lists_json(monkeypatch, tmp_path, capsys):
+    manifest_dir = tmp_path / ".runs"
+    m1 = RunManifest("run-a", manifest_dir=manifest_dir)
+    m1.set_phase("download", "completed")
+    m1.set_phase("process", "completed")
+    m1.finalize("completed")
+    m1.save()
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["mssp-runs", "--manifest-dir", str(manifest_dir), "--format", "json"],
+    )
+    cli.runs_main()
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["manifest_dir"] == str(manifest_dir)
+    assert payload["runs"][0]["run_id"] == "run-a"
+
+
+def test_runs_main_missing_run_id(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["mssp-runs", "--manifest-dir", str(tmp_path / ".runs"), "--run-id", "does-not-exist"],
+    )
+    with pytest.raises(SystemExit):
+        cli.runs_main()
+
+
+def test_runs_main_rejects_invalid_run_id(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["mssp-runs", "--manifest-dir", str(tmp_path / ".runs"), "--run-id", "bad/id"],
+    )
+
+    with pytest.raises(SystemExit):
+        cli.runs_main()
+
+    assert "Invalid run id" in capsys.readouterr().out

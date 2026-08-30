@@ -1,0 +1,29 @@
+# Build context only needs the package, its metadata, the Linux CLI binary and
+# the docker scripts. Everything else here is either large, host-specific, or
+# irrelevant to the image -- infra/ alone carries ~1.5 GB of Terraform provider
+# binaries under .terraform/.
+.git
+.gitignore
+.claude
+.venv
+infra
+docs
+tests
+scripts
+downloads
+reference
+STAGED
+.runs
+target
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.DS_Store
+.env
+config.txt
+state.json
+*.duckdb
+# The macOS build of the CLI is never used in the image; the Linux one is
+# copied explicitly by the Dockerfile.
+bin/acoms-cli

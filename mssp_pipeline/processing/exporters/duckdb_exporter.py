@@ -1,21 +1,21 @@
-from .base import normalize_identifier, normalize_query
+from .base import normalize_identifier, normalize_query, qualified_identifier, string_literal
 
 
 class DuckDBExporter:
     def __init__(self, schema: str = "raw_data", full_refresh: bool = False):
-        self.schema = schema
+        self.schema = normalize_identifier(schema)
         self.full_refresh = full_refresh
 
     def export(self, query: str, table_name: str, duckdb_connection) -> None:
         table_name = normalize_identifier(table_name)
         query = normalize_query(query, duckdb_connection)
-        destination = f"{self.schema}.{table_name}"
+        destination = qualified_identifier(self.schema, table_name, field_name="table reference")
         duckdb_connection.execute(f"CREATE SCHEMA IF NOT EXISTS {self.schema}")
 
         table_exists = duckdb_connection.execute(f"""
             SELECT COUNT(*) FROM information_schema.tables
-            WHERE table_schema = '{self.schema}'
-              AND table_name   = '{table_name}'
+            WHERE table_schema = {string_literal(self.schema)}
+              AND table_name   = {string_literal(table_name)}
         """).fetchone()[0] > 0
 
         if self.full_refresh or not table_exists:
@@ -34,14 +34,18 @@ class DuckDBExporter:
         table_name = normalize_identifier(table_name)
         table_exists = duckdb_connection.execute(f"""
             SELECT COUNT(*) FROM information_schema.tables
-            WHERE table_schema = '{self.schema}'
-              AND table_name   = '{table_name}'
+            WHERE table_schema = {string_literal(self.schema)}
+              AND table_name   = {string_literal(table_name)}
         """).fetchone()[0] > 0
         if not table_exists:
             return []
         return [
             row[0]
             for row in duckdb_connection.execute(
-                f"SELECT DISTINCT FILE_PATH FROM {self.schema}.{table_name}"
+                f"SELECT DISTINCT FILE_PATH FROM {qualified_identifier(self.schema, table_name, field_name='table reference')}"
             ).fetchall()
         ]
+
+    def get_missing_file_paths(self, table_name: str, candidate_file_paths: list[str], duckdb_connection) -> list[str]:
+        existing = set(self.get_existing_file_paths(table_name, duckdb_connection))
+        return [path for path in candidate_file_paths if path not in existing]
