@@ -66,6 +66,7 @@ def run(
                            from mssp_pipeline.config.
     """
     from mssp_pipeline.run_manifest import RunManifest, redact_url
+    from mssp_pipeline.evidence.sink import JsonlEvidenceSink
 
     started = time.perf_counter()
     download_dir = Path(download_dir)
@@ -78,7 +79,11 @@ def run(
         state_file = Path("state.json")
 
     effective_run_id = run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    manifest = RunManifest(effective_run_id, manifest_dir=Path(manifest_dir))
+    # The run's append-only evidence log lives alongside its manifest. The
+    # manifest is the projection over these records; the JSONL sink is the
+    # development-only durable sink (the acceptance sink is selected later).
+    evidence_sink = JsonlEvidenceSink(Path(manifest_dir) / f"{effective_run_id}.evidence.jsonl")
+    manifest = RunManifest(effective_run_id, manifest_dir=Path(manifest_dir), sink=evidence_sink)
     manifest.set_params(
         aco=aco,
         start_year=start_year,
