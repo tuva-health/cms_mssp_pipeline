@@ -1,0 +1,109 @@
+{
+  "contract": "cms-mssp-workbook-export",
+  "version": "1.0.0",
+  "grain": "cell",
+  "title": "CMS MSSP workbook export contract, v1",
+  "description": "Canonical, machine-readable API for the BNMRK / AEXPU / QEXPU sectioned-workbook exports. Every data sheet in these three ACO benchmark workbooks is unpivoted into one long/tidy, cell-grain relation: one row per (sheet row x sheet column) cell, carrying the section/row/column hierarchy plus path-derived delivery metadata. This contract publishes the exact set of twenty relations, the shared cell-grain schema each conforms to, and the optional-sheet behavior, so consumers can check benchmark outputs independently. Real agreement rows remain client-owned; this contract exposes shape and versioning only.",
+  "schemas": {
+    "cell_grain": {
+      "description": "The long/tidy schema every BNMRK/AEXPU/QEXPU relation conforms to. The first eight columns are the sheet grammar (section/row/column hierarchy and the verbatim cell value); the remaining nine are path-derived delivery metadata appended to every row. Column names are the exported (lowercase, cross-warehouse-normalised) identifiers. All cell values are emitted VARCHAR verbatim; typing and casting happen downstream in dbt.",
+      "columns": [
+        {"name": "row_num", "type": "BIGINT", "role": "grammar", "nullable": false, "description": "1-based position of the source row as the sheet reader returned it."},
+        {"name": "group_label", "type": "VARCHAR", "role": "grammar", "nullable": true, "description": "Nearest unbracketed section header above the row (the merged primary group)."},
+        {"name": "section_code", "type": "VARCHAR", "role": "grammar", "nullable": true, "description": "Bracketed section code, e.g. 'A1' from '[A1] Person Years'; NULL for an unbracketed section."},
+        {"name": "section_label", "type": "VARCHAR", "role": "grammar", "nullable": true, "description": "Label of the section the row belongs to."},
+        {"name": "row_label", "type": "VARCHAR", "role": "grammar", "nullable": true, "description": "Normalised label from column A of the data row."},
+        {"name": "column_group_label", "type": "VARCHAR", "role": "grammar", "nullable": true, "description": "Merged primary header above a two-level column header; NULL for single-level headers and always NULL on key/value (Parameters) sheets."},
+        {"name": "column_label", "type": "VARCHAR", "role": "grammar", "nullable": true, "description": "Header label of the value column this cell came from."},
+        {"name": "value_text", "type": "VARCHAR", "role": "grammar", "nullable": true, "description": "The cell value, VARCHAR verbatim ('-' stays '-')."},
+        {"name": "file_path", "type": "VARCHAR", "role": "metadata", "nullable": false, "description": "Slash-normalised source workbook path; the incremental-dedup key."},
+        {"name": "directory_name", "type": "VARCHAR", "role": "metadata", "nullable": false, "description": "Directory portion of file_path."},
+        {"name": "file_name", "type": "VARCHAR", "role": "metadata", "nullable": false, "description": "Base filename of the source workbook."},
+        {"name": "file_date", "type": "DATE", "role": "metadata", "nullable": true, "description": "Delivery date derived from the path/filename; NULL when the stamp is a placeholder or otherwise unparseable."},
+        {"name": "aco_id", "type": "VARCHAR", "role": "metadata", "nullable": true, "description": "ACO identifier the run is scoped to."},
+        {"name": "performance_year", "type": "VARCHAR", "role": "metadata", "nullable": true, "description": "Four-digit performance year from the directory layout; NULL when absent."},
+        {"name": "benchmark_year", "type": "VARCHAR", "role": "metadata", "nullable": true, "description": "Benchmark year from the AEXPU 'Y<year>' filename token; always NULL for BNMRK and QEXPU."},
+        {"name": "submission_id", "type": "VARCHAR", "role": "metadata", "nullable": true, "description": "'D<YYMMDD>.T<NNNNNNN>' submission stamp distinguishing deliveries; NULL when absent."},
+        {"name": "period", "type": "VARCHAR", "role": "metadata", "nullable": true, "description": "Family-specific period token: the submission id (BNMRK), 'Y<year>' (AEXPU), or the literal quarter such as '2026Q1' (QEXPU)."}
+      ]
+    }
+  },
+  "families": {
+    "BNMRK": {
+      "workbook": "Historical Benchmark report",
+      "filename_token": ".BNMRK.",
+      "cadence": "Up to three deliveries per performance year (March preliminary, June, October), distinguished by submission_id.",
+      "period_meaning": "submission_id",
+      "benchmark_year": "always NULL"
+    },
+    "AEXPU": {
+      "workbook": "Annual Expenditure & Utilization report",
+      "filename_token": ".AEXPU.",
+      "cadence": "One workbook per benchmark year (BY1/BY2/BY3), delivered inside the BNMRK bundle.",
+      "period_meaning": "'Y<benchmark_year>'",
+      "benchmark_year": "populated from the 'Y<year>' filename token"
+    },
+    "QEXPU": {
+      "workbook": "Quarterly Expenditure & Utilization report",
+      "filename_token": ".QEXPU.",
+      "cadence": "One workbook per quarter.",
+      "period_meaning": "literal quarter, e.g. '2026Q1'",
+      "benchmark_year": "always NULL"
+    }
+  },
+  "optional_sheet_behavior": {
+    "summary": "Not every delivery carries every sheet. A relation whose source sheet is absent from the deliveries in a batch contributes zero rows for that batch rather than raising; the relation and its full cell-grain schema still materialise. A relation is flagged 'optional' when its source sheet is legitimately absent from some conforming deliveries.",
+    "absent_sheet": "zero rows, schema-conformant table still produced (not an error)",
+    "every_file_in_batch_fails_to_open": "error",
+    "ambiguous_sheet_pattern": "error (a pattern must select exactly one sheet per workbook)",
+    "optional_relations": {
+      "BNMRK_TABLE_6": "'Table 6 - ACPT' is present only in the June and October deliveries, not the March preliminary.",
+      "AEXPU_TABLE_1A": "COVID-excluding variant present in the BY1/BY2 workbooks and absent from BY3.",
+      "AEXPU_TABLE_4A": "COVID-excluding variant present in the BY1/BY2 workbooks and absent from BY3."
+    }
+  },
+  "relations": [
+    {"relation": "BNMRK_TABLE_1", "table": "bnmrk_table_1", "family": "BNMRK", "sheet_pattern": "Table 1 - %", "kind": "sectioned_matrix", "schema": "cell_grain", "optional": false},
+    {"relation": "BNMRK_TABLE_1A", "table": "bnmrk_table_1a", "family": "BNMRK", "sheet_pattern": "Table 1A - %", "kind": "sectioned_matrix", "schema": "cell_grain", "optional": false},
+    {"relation": "BNMRK_TABLE_1B", "table": "bnmrk_table_1b", "family": "BNMRK", "sheet_pattern": "Table 1B - %", "kind": "sectioned_matrix", "schema": "cell_grain", "optional": false},
+    {"relation": "BNMRK_TABLE_1C", "table": "bnmrk_table_1c", "family": "BNMRK", "sheet_pattern": "Table 1C - %", "kind": "sectioned_matrix", "schema": "cell_grain", "optional": false},
+    {"relation": "BNMRK_TABLE_2", "table": "bnmrk_table_2", "family": "BNMRK", "sheet_pattern": "Table 2 - %", "kind": "sectioned_matrix", "schema": "cell_grain", "optional": false},
+    {"relation": "BNMRK_TABLE_3", "table": "bnmrk_table_3", "family": "BNMRK", "sheet_pattern": "Table 3 - %", "kind": "sectioned_matrix", "schema": "cell_grain", "optional": false},
+    {"relation": "BNMRK_TABLE_4", "table": "bnmrk_table_4", "family": "BNMRK", "sheet_pattern": "Table 4 - %", "kind": "sectioned_matrix", "schema": "cell_grain", "optional": false},
+    {"relation": "BNMRK_TABLE_5", "table": "bnmrk_table_5", "family": "BNMRK", "sheet_pattern": "Table 5 - %", "kind": "sectioned_matrix", "schema": "cell_grain", "optional": false},
+    {"relation": "BNMRK_TABLE_6", "table": "bnmrk_table_6", "family": "BNMRK", "sheet_pattern": "Table 6 - %", "kind": "sectioned_matrix", "schema": "cell_grain", "optional": true},
+    {"relation": "BNMRK_PARAMETERS", "table": "bnmrk_parameters", "family": "BNMRK", "sheet_pattern": "Parameters", "kind": "key_value", "schema": "cell_grain", "optional": false, "synthetic_column_labels": ["VALUE"]},
+    {"relation": "AEXPU_TABLE_1", "table": "aexpu_table_1", "family": "AEXPU", "sheet_pattern": "Table\\_1-%", "kind": "sectioned_matrix", "schema": "cell_grain", "optional": false},
+    {"relation": "AEXPU_TABLE_1A", "table": "aexpu_table_1a", "family": "AEXPU", "sheet_pattern": "Table\\_1A-%", "kind": "sectioned_matrix", "schema": "cell_grain", "optional": true},
+    {"relation": "AEXPU_TABLE_3", "table": "aexpu_table_3", "family": "AEXPU", "sheet_pattern": "Table\\_3-%", "kind": "sectioned_matrix", "schema": "cell_grain", "optional": false},
+    {"relation": "AEXPU_TABLE_4", "table": "aexpu_table_4", "family": "AEXPU", "sheet_pattern": "Table\\_4-%", "kind": "sectioned_matrix", "schema": "cell_grain", "optional": false},
+    {"relation": "AEXPU_TABLE_4A", "table": "aexpu_table_4a", "family": "AEXPU", "sheet_pattern": "Table\\_4A-%", "kind": "sectioned_matrix", "schema": "cell_grain", "optional": true},
+    {"relation": "AEXPU_PARAMETERS", "table": "aexpu_parameters", "family": "AEXPU", "sheet_pattern": "Parameters", "kind": "key_value", "schema": "cell_grain", "optional": false, "synthetic_column_labels": ["VALUE"]},
+    {"relation": "QEXPU_TABLE_1", "table": "qexpu_table_1", "family": "QEXPU", "sheet_pattern": "Table\\_1-%", "kind": "sectioned_matrix", "schema": "cell_grain", "optional": false},
+    {"relation": "QEXPU_TABLE_2", "table": "qexpu_table_2", "family": "QEXPU", "sheet_pattern": "Table\\_2-%", "kind": "sectioned_matrix", "schema": "cell_grain", "optional": false},
+    {"relation": "QEXPU_TABLE_3", "table": "qexpu_table_3", "family": "QEXPU", "sheet_pattern": "Table\\_3-%", "kind": "sectioned_matrix", "schema": "cell_grain", "optional": false},
+    {"relation": "QEXPU_PARAMETERS", "table": "qexpu_parameters", "family": "QEXPU", "sheet_pattern": "Parameters", "kind": "key_value", "schema": "cell_grain", "optional": false, "synthetic_column_labels": ["VALUE"]}
+  ],
+  "accepted_output_set": [
+    "BNMRK_TABLE_1",
+    "BNMRK_TABLE_1A",
+    "BNMRK_TABLE_1B",
+    "BNMRK_TABLE_1C",
+    "BNMRK_TABLE_2",
+    "BNMRK_TABLE_3",
+    "BNMRK_TABLE_4",
+    "BNMRK_TABLE_5",
+    "BNMRK_TABLE_6",
+    "BNMRK_PARAMETERS",
+    "AEXPU_TABLE_1",
+    "AEXPU_TABLE_1A",
+    "AEXPU_TABLE_3",
+    "AEXPU_TABLE_4",
+    "AEXPU_TABLE_4A",
+    "AEXPU_PARAMETERS",
+    "QEXPU_TABLE_1",
+    "QEXPU_TABLE_2",
+    "QEXPU_TABLE_3",
+    "QEXPU_PARAMETERS"
+  ]
+}
