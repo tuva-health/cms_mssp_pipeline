@@ -155,7 +155,7 @@ def test_validate_config_rejects_unsafe_aco_id(aco_id):
         validate_config(_processing_config(ACO_ID=aco_id))
 
 
-@pytest.mark.parametrize("aco_id", ["A5495", "aco-123", "Z99", "test_0001"])
+@pytest.mark.parametrize("aco_id", ["A0000", "aco-123", "Z99", "test_0001"])
 def test_validate_config_does_not_impose_a_client_aco_format(aco_id):
     # The generic pipeline accepts any safe, non-empty id — the client
     # [A-Z][0-9]{4} rule must not be promoted upstream.
@@ -197,8 +197,8 @@ def test_validate_config_accepts_safe_file_store(file_store):
 
 
 # ---------------------------------------------------------------------------
-# Generic multi-cloud dispatch — the read side routes purely by the parsed
-# scheme, so abfss maps to Azure and a local path configures no cloud backend.
+# Generic multi-cloud dispatch — each supported file-store scheme configures its
+# own backend (abfss maps to Azure) and a local path configures no cloud backend.
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize(
@@ -212,7 +212,7 @@ def test_validate_config_accepts_safe_file_store(file_store):
         ("gs://bucket/prefix", "gcs"),
     ],
 )
-def test_load_extensions_dispatches_by_parsed_scheme(file_store, backend):
+def test_load_extensions_dispatches_each_scheme_to_its_backend(file_store, backend):
     session = DuckDBSession.__new__(DuckDBSession)
     session._config = SimpleNamespace(FILE_STORE=file_store)
     session.connection = MagicMock()
