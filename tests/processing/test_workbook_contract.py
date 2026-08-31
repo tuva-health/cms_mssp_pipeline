@@ -23,6 +23,7 @@ The synthetic fixtures are reused verbatim from
 
 import importlib
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -129,12 +130,19 @@ def test_accepted_output_set_is_all_twenty_relations(contract):
 
 
 def test_no_legacy_expu_relation_is_declared(contract):
-    """Legacy EXPU is retired: it appears nowhere in the published contract."""
-    blob = json.dumps(contract).upper()
-    assert "EXPU_TABLE" not in blob or "AEXPU_TABLE" in blob  # sanity of the check
+    """Legacy EXPU is retired: it appears nowhere in the published contract.
+
+    A standalone-EXPU relation is one whose family/name/table begins with EXPU
+    on its own — the leading '^' is what excludes the annual/quarterly AEXPU and
+    QEXPU relations, whose names merely *contain* 'EXPU'. Adding an
+    ``EXPU_TABLE_1`` / ``EXPU_PARAMETERS`` relation (family "EXPU") would fail
+    here.
+    """
+    legacy = re.compile(r"^EXPU(_|$)")
     for r in contract["relations"]:
-        assert r["relation"] not in {"EXPU_TABLE_1", "EXPU_PARAMETERS"}
-        assert r["family"] != "EXPU"
+        assert not legacy.match(r["family"]), r["family"]
+        assert not legacy.match(r["relation"]), r["relation"]
+        assert not legacy.match(r["table"].upper()), r["table"]
 
 
 @pytest.mark.parametrize(
