@@ -60,3 +60,15 @@ output "snowflake_rsa_key_secret_arn" {
 output "snowflake_rsa_key_passphrase_secret_arn" {
   value = try(aws_secretsmanager_secret.snowflake_rsa_key_passphrase[0].arn, null)
 }
+
+output "data_bucket_name" {
+  value = try(aws_s3_bucket.data[0].id, null)
+}
+
+output "pipeline_repository_url" {
+  value = try(aws_ecr_repository.pipeline[0].repository_url, null)
+}
+
+output "connector_repository_url" {
+  value = try(aws_ecr_repository.connector[0].repository_url, null)
+}

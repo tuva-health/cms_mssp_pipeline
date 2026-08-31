@@ -9,7 +9,8 @@ terraform {
 }
 
 provider "aws" {
-  region = var.region
+  region              = var.region
+  allowed_account_ids = length(var.allowed_account_ids) > 0 ? var.allowed_account_ids : null
 }
 
 data "aws_caller_identity" "current" {}
@@ -153,7 +154,7 @@ resource "aws_ecs_cluster" "this" {
 
 resource "aws_cloudwatch_log_group" "ecs" {
   name              = "/ecs/${var.project_name}"
-  retention_in_days = 30
+  retention_in_days = var.log_retention_days
   tags              = var.tags
 }
 

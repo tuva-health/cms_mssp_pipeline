@@ -55,20 +55,39 @@ export AWS_REGION="$REGION"
 export REGION
 export ACCOUNT_ID
 
+# The image must be pinned by digest so a registered task revision resolves to
+# exactly one build. PIPELINE_IMAGE comes from the release metadata written by
+# build-and-push-image.sh; no mutable ":tag" or latest-discovery is permitted.
+require_immutable_image() {
+  local image="${PIPELINE_IMAGE:-}"
+  if [[ -z "$image" ]]; then
+    echo "PIPELINE_IMAGE is required (repository@sha256:<digest>). Set it in $ENV_FILE or the environment." >&2
+    exit 1
+  fi
+  if [[ ! "$image" =~ ^[^@[:space:]]+@sha256:[0-9a-f]{64}$ ]]; then
+    echo "PIPELINE_IMAGE must be an immutable repository@sha256 digest, got: $image" >&2
+    exit 1
+  fi
+}
+
 resolve_secret_arn() {
   local secret_id="$1"
   aws secretsmanager describe-secret --secret-id "$secret_id" --query ARN --output text
 }
 
-latest_taskdef_arn() {
+recorded_taskdef_arn() {
+  # Exact revision recorded at register time; never a mutable "latest" lookup.
   local family="$1"
-  aws ecs describe-task-definition \
-    --task-definition "$family" \
-    --query 'taskDefinition.taskDefinitionArn' \
-    --output text
+  local arns_file="$CLIENT_DIR/rendered/task-definition-arns.json"
+  [[ -f "$arns_file" ]] || {
+    echo "Registered task-definition ARNs not found. Run register-taskdefs first." >&2
+    exit 1
+  }
+  python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$arns_file" "$family"
 }
 
 render_taskdefs() {
+  require_immutable_image
   local out_dir="$CLIENT_DIR/rendered"
   mkdir -p "$out_dir"
 
@@ -128,7 +147,7 @@ def role_arn(role_suffix: str) -> str:
 repl = {
     '<ACCOUNT_ID>': account_id,
     '<REGION>': region,
-    '<TAG>': os.environ.get('IMAGE_TAG', 'latest'),
+    '<PIPELINE_IMAGE_URI>': os.environ.get('PIPELINE_IMAGE', ''),
     '<ACO_ID>': aco_id,
     '<FILE_STORE_URI>': s3_uri(bucket, file_store_prefix),
     '<OUTPUT_URI>': output_location_override or s3_uri(bucket, output_prefix),
@@ -209,7 +228,7 @@ def role_arn(role_suffix: str) -> str:
 repl = {
     '<ACCOUNT_ID>': account_id,
     '<REGION>': os.environ.get('REGION', ''),
-    '<TAG>': os.environ.get('IMAGE_TAG', 'latest'),
+    '<PIPELINE_IMAGE_URI>': os.environ.get('PIPELINE_IMAGE', ''),
     '<NAT_EIP_OR_EMPTY>': os.environ.get('NAT_EIP_OR_EMPTY', ''),
     '<TASK_EXECUTION_ROLE_ARN>': role_arn('ecs-task-execution-role'),
     '<BOOTSTRAP_TASK_ROLE_ARN>': role_arn('bootstrap-task-role'),
@@ -236,9 +255,24 @@ register_taskdefs() {
     echo "Rendered taskdefs not found. Run render-taskdefs first." >&2
     exit 1
   }
-  aws ecs register-task-definition --cli-input-json "file://$bootstrap_json" >/dev/null
-  aws ecs register-task-definition --cli-input-json "file://$runtime_json" >/dev/null
-  echo "Registered ECS task definitions (bootstrap + runtime)."
+  local bootstrap_arn runtime_arn
+  bootstrap_arn="$(aws ecs register-task-definition --cli-input-json "file://$bootstrap_json" \
+    --query 'taskDefinition.taskDefinitionArn' --output text)"
+  runtime_arn="$(aws ecs register-task-definition --cli-input-json "file://$runtime_json" \
+    --query 'taskDefinition.taskDefinitionArn' --output text)"
+  # Record the EXACT registered revisions so activate binds to them, never to a
+  # mutable "latest" family lookup.
+  python3 - "$out_dir/task-definition-arns.json" "$bootstrap_arn" "$runtime_arn" <<'PY'
+import json, sys
+path, bootstrap_arn, runtime_arn = sys.argv[1:]
+json.dump(
+    {"mssp-pipeline-bootstrap": bootstrap_arn, "mssp-pipeline-runtime": runtime_arn},
+    open(path, "w"),
+    indent=2,
+)
+open(path, "a").write("\n")
+PY
+  echo "Registered ECS task definitions (bootstrap + runtime) at exact revisions."
 }
 
 terraform_apply() {
@@ -257,8 +291,8 @@ terraform_apply() {
 
   if [[ "$stage" == "activate" ]]; then
     local runtime_taskdef_arn
-    runtime_taskdef_arn="$(latest_taskdef_arn mssp-pipeline-runtime)"
-    echo "Using latest runtime task definition ARN: $runtime_taskdef_arn"
+    runtime_taskdef_arn="$(recorded_taskdef_arn mssp-pipeline-runtime)"
+    echo "Using recorded runtime task definition ARN: $runtime_taskdef_arn"
     terraform -chdir="$tf_dir" apply \
       -auto-approve \
       -var-file="$tfvars" \

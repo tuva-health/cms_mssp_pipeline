@@ -1,0 +1,20 @@
+# Remote-state backend bootstrap inputs (infra/terraform/aws/bootstrap).
+# Copy to bootstrap.tfvars in your private client overlay and fill in real
+# values. Nothing here is committed with real values upstream.
+
+aws_account_id    = "<your-12-digit-account-id>"
+aws_region        = "us-east-1"
+state_bucket_name = "replace-with-globally-unique-state-bucket"
+
+# Named operator role(s) allowed to assume the deployment role. Role ARNs only
+# (IAM roles or IAM Identity Center permission-set roles); user ARNs and static
+# access keys are rejected.
+deployer_principal_arns = [
+  "arn:aws:iam::<your-12-digit-account-id>:role/<your-operator-role>",
+]
+
+# Optional overrides:
+# deployer_role_name           = "mssp-deployer"
+# deployer_max_session_duration = 14400
+# deployer_managed_policy_arns = ["arn:aws:iam::aws:policy/AdministratorAccess"]
+# tags = { ManagedBy = "Terraform", Project = "<your-project>" }

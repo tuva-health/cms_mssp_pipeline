@@ -15,10 +15,30 @@
   "taskRoleArn": "<RUNTIME_TASK_ROLE_ARN>",
   "containerDefinitions": [
     {
+      "name": "readiness-gates",
+      "image": "<PIPELINE_IMAGE_URI>",
+      "essential": false,
+      "command": ["python", "-m", "mssp_pipeline.readiness", "bootstrap", "whitelist"],
+      "environment": [
+        { "name": "AWS_REGION", "value": "<REGION>" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/mssp-pipeline",
+          "awslogs-region": "<REGION>",
+          "awslogs-stream-prefix": "readiness"
+        }
+      }
+    },
+    {
       "name": "mssp-runtime",
-      "image": "<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/mssp-pipeline:<TAG>",
+      "image": "<PIPELINE_IMAGE_URI>",
       "essential": true,
       "command": ["mssp-pipeline"],
+      "dependsOn": [
+        { "containerName": "readiness-gates", "condition": "SUCCESS" }
+      ],
       "environment": [
         { "name": "MSSP_WORKDIR", "value": "/app" },
         { "name": "MSSP_WRITE_CONFIG_TXT", "value": "auto" },

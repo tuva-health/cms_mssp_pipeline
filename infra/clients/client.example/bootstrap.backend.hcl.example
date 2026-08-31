@@ -1,0 +1,8 @@
+# Backend config for the bootstrap root. Note: the bootstrap root creates this
+# very bucket, so its first apply runs with LOCAL state and is then migrated
+# here (see scripts/bootstrap-terraform-backend.sh).
+bucket       = "replace-with-globally-unique-state-bucket"
+key          = "mssp/bootstrap.tfstate"
+region       = "us-east-1"
+encrypt      = true
+use_lockfile = true

@@ -13,7 +13,7 @@
   "containerDefinitions": [
     {
       "name": "mssp-bootstrap",
-      "image": "<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/mssp-pipeline:<TAG>",
+      "image": "<PIPELINE_IMAGE_URI>",
       "essential": true,
       "command": ["mssp-bootstrap-config"],
       "environment": [
