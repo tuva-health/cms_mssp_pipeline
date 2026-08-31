@@ -10,6 +10,7 @@ from mssp_pipeline.processing.session import DuckDBSession
 
 def test_validate_config_accepts_gs_file_store():
     cfg = SimpleNamespace(
+        ACO_ID="T0000",
         OUTPUT_TYPE="PARQUET",
         OUTPUT_LOCATION="/tmp/out",
         FILE_STORE="gs://bucket/base",

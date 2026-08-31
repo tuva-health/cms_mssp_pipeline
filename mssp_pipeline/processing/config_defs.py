@@ -1,5 +1,12 @@
 from dataclasses import dataclass, fields
 
+from mssp_pipeline.integration.remote_store import (
+    contains_duckdb_glob_operator,
+    is_remote_store,
+    parse_remote_store,
+    validate_source_identifier,
+)
+
 
 @dataclass(frozen=True)
 class SnowflakeConfig:
@@ -59,15 +66,39 @@ def validate_config(cfg) -> None:
     """
     output_type = cfg.OUTPUT_TYPE
 
-    def _require(var_name: str, value: str, context: str) -> None:
-        if not value:
+    def _require(var_name: str, value: str, context: str) -> str:
+        if not value or not str(value).strip():
             raise ValueError(f"{context} requires {var_name} to be set in .env, the environment, or config.py")
+        return value
 
     def _require_dataclass_fields(obj, required_fields: list[str], context: str) -> None:
         for field_name in required_fields:
             value = getattr(obj, field_name, "")
             if not value:
                 raise ValueError(f"{context} requires {field_name} to be set in .env, the environment, or config.py")
+
+    # --- Source identity and location validation (fail-closed) ---
+    # ACO_ID and FILE_STORE are spliced verbatim into filesystem paths and
+    # DuckDB glob patterns, so both must be present and safe before any listing
+    # runs. Only generic, safe, non-empty composition is enforced here — no
+    # client-specific identifier format.
+    aco_id = _require("MSSP_ACO_ID", cfg.ACO_ID, "processing")
+    try:
+        validate_source_identifier(aco_id, field_name="MSSP_ACO_ID")
+    except ValueError as exc:
+        raise ValueError(f"Invalid MSSP_ACO_ID: {exc}") from exc
+
+    file_store = _require("MSSP_FILE_STORE", cfg.FILE_STORE, "processing")
+    source_scheme = None
+    if is_remote_store(file_store):
+        try:
+            source_scheme = parse_remote_store(file_store).scheme
+        except ValueError as exc:
+            raise ValueError(f"Invalid MSSP_FILE_STORE: {exc}") from exc
+    elif contains_duckdb_glob_operator(file_store):
+        raise ValueError("Invalid MSSP_FILE_STORE: must not contain DuckDB glob operators")
+    elif "://" in file_store:
+        raise ValueError(f"Invalid MSSP_FILE_STORE: unsupported URI scheme in {file_store}")
 
     # --- Output backend validation ---
     if output_type in ("PARQUET", "DUCKDB"):
@@ -112,16 +143,14 @@ def validate_config(cfg) -> None:
         )
 
     # --- Source backend validation ---
-    file_store = cfg.FILE_STORE
-
-    if file_store.startswith("s3://"):
+    if source_scheme == "s3":
         _require("AWS_REGION", cfg.AWS_REGION, "S3 FILE_STORE")
 
-    elif file_store.startswith("gs://"):
+    elif source_scheme == "gs":
         _require("GCS_KEY_ID", cfg.GCS_KEY_ID, "GCS FILE_STORE")
         _require("GCS_SECRET", cfg.GCS_SECRET, "GCS FILE_STORE")
 
-    elif file_store.startswith(("az://", "azure://", "abfss://")):
+    elif source_scheme in {"az", "azure", "abfss"}:
         if not cfg.AZURE_STORAGE_CONNECTION_STRING and not cfg.AZURE_STORAGE_ACCOUNT:
             raise ValueError(
                 "Azure FILE_STORE requires either AZURE_STORAGE_CONNECTION_STRING or "

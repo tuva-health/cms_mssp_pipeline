@@ -2,9 +2,55 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
+
+
+# The remote store schemes the pipeline understands. Anything else is rejected
+# rather than silently treated as a local path or an unsupported backend.
+REMOTE_STORE_SCHEMES = ("s3", "az", "azure", "abfss", "gs")
+REMOTE_STORE_PREFIXES = tuple(f"{scheme}://" for scheme in REMOTE_STORE_SCHEMES)
+
+# DuckDB's glob() treats these as wildcards. A source value carrying one would
+# broaden or redirect a listing, so they are never allowed in a path-spliced
+# identity or location.
+DUCKDB_GLOB_OPERATORS = "*?[]"
+
+# A source identifier is spliced verbatim into filesystem paths and DuckDB glob
+# patterns on both the ingest and read sides. Only safe, non-empty composition
+# is enforced here: letters, digits, and the punctuation that appears in real
+# CMS identifiers, with no path separators, whitespace, quotes, or glob
+# operators. This is deliberately weaker than any single client's format — a
+# stricter per-client rule is downstream policy, not a generic invariant.
+_SAFE_IDENTIFIER_PATTERN = re.compile(r"[A-Za-z0-9._-]+")
+
+
+def contains_duckdb_glob_operator(path: str) -> bool:
+    return any(operator in path for operator in DUCKDB_GLOB_OPERATORS)
+
+
+def validate_source_identifier(value, *, field_name: str = "source identifier") -> str:
+    """Return ``value`` when it is safe to splice into a path/glob, else raise.
+
+    Rejects empty or whitespace-only values, path separators, ``.``/``..``
+    traversal segments, DuckDB glob operators, whitespace, and quotes.
+    """
+    if value is None or not str(value).strip():
+        raise ValueError(
+            f"{field_name} must be a non-empty value with no surrounding whitespace"
+        )
+    text = str(value)
+    if text in {".", ".."}:
+        raise ValueError(f"{field_name} must not be a path traversal segment: {value!r}")
+    if not _SAFE_IDENTIFIER_PATTERN.fullmatch(text):
+        raise ValueError(
+            f"{field_name} contains unsafe characters: {value!r}. Allowed: letters, "
+            f"digits, '.', '-', '_' — with no path separators, whitespace, quotes, "
+            f"or glob operators"
+        )
+    return text
 
 
 @dataclass(frozen=True)
@@ -35,12 +81,40 @@ class RemoteLocation:
 
 
 def is_remote_store(path: str | None) -> bool:
-    return bool(path and path.startswith(("s3://", "az://", "azure://", "abfss://", "gs://")))
+    return bool(path and path.startswith(REMOTE_STORE_PREFIXES))
+
+
+def _validate_remote_path(uri: str, path: str) -> str:
+    """Return the safe prefix for ``path``, or raise for a location that could
+    escape or broaden its intended prefix.
+
+    Glob operators, empty path segments (a trailing or interior ``/``), and
+    ``.``/``..`` traversal segments are all rejected. The glob check runs on the
+    raw URI slice because urlsplit does not decode ``[`` / ``]`` consistently.
+    """
+    raw_prefix = uri.split("://", maxsplit=1)[1].partition("/")[2]
+    if contains_duckdb_glob_operator(raw_prefix):
+        raise ValueError(f"Remote store URI contains a DuckDB glob operator: {uri}")
+    if path.endswith("/") or "//" in path:
+        raise ValueError(f"Remote store URI contains an empty path segment: {uri}")
+    prefix = path.lstrip("/")
+    if any(segment in {".", ".."} for segment in prefix.split("/")):
+        raise ValueError(f"Remote store URI contains a dot path segment: {uri}")
+    return prefix
 
 
 def parse_remote_store(uri: str) -> RemoteLocation:
+    raw_authority = uri.partition("://")[2].partition("/")[0]
+    if contains_duckdb_glob_operator(raw_authority):
+        raise ValueError(
+            f"Remote store URI authority contains a DuckDB glob operator: {uri}"
+        )
+
+    parsed = urlsplit(uri)
+    if parsed.query or parsed.fragment:
+        raise ValueError(f"Remote store URI must not contain a query or fragment: {uri}")
+
     if uri.startswith("abfss://"):
-        parsed = urlsplit(uri)
         filesystem, _, host = parsed.netloc.partition("@")
         if not filesystem or not host:
             raise ValueError(f"Invalid Azure Data Lake URI: {uri}")
@@ -48,19 +122,18 @@ def parse_remote_store(uri: str) -> RemoteLocation:
         return RemoteLocation(
             scheme="abfss",
             bucket=filesystem,
-            prefix=parsed.path.lstrip("/"),
+            prefix=_validate_remote_path(uri, parsed.path),
             account_name=account_name,
         )
 
-    parsed = urlsplit(uri)
-    if parsed.scheme not in {"s3", "az", "azure", "gs"}:
+    if parsed.scheme not in REMOTE_STORE_SCHEMES:
         raise ValueError(f"Unsupported remote store URI: {uri}")
     if not parsed.netloc:
         raise ValueError(f"Remote store URI is missing a bucket/container: {uri}")
     return RemoteLocation(
         scheme=parsed.scheme,
         bucket=parsed.netloc,
-        prefix=parsed.path.lstrip("/"),
+        prefix=_validate_remote_path(uri, parsed.path),
     )
 
 
