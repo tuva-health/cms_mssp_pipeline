@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Tuple
 import duckdb
 
 from .sectioned_sheet import SectionedSheetProcessor
+from ..exceptions import SourceDiscoveryError, is_empty_glob
 from ..sql import sql_string_literal
 
 # The delivery filename always ends '.D<YYMMDD>.T<7 digits>.xlsx'. That pair is
@@ -70,11 +71,18 @@ class ACOWorkbookProcessor(SectionedSheetProcessor):
                 f"SELECT * FROM glob({sql_string_literal(pattern)})"
             ).fetchall()
         except duckdb.IOException as e:
-            print(
-                f"  Warning: could not list {self.__class__.__name__} source files "
+            # A glob that ran and matched nothing (local no-match, or the zipfs/
+            # remote "No files found that match the pattern" IOException) means the
+            # prefix is empty. Any other IOException — 403, wrong bucket, expired
+            # credentials — means the listing itself failed and must not be read as
+            # "no workbooks delivered yet", which would skip the table and still
+            # report success.
+            if is_empty_glob(e):
+                return []
+            raise SourceDiscoveryError(
+                f"Could not list {self.__class__.__name__} source files "
                 f"(pattern={pattern}): {e}"
-            )
-            return []
+            ) from e
         return sorted(r[0] for r in rows)
 
     def _list_source_file_paths(self, file_def) -> List[Tuple[str, str]]:

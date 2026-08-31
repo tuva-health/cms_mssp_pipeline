@@ -228,6 +228,10 @@ def pipeline_main() -> None:
     effective_start_year = args.start_year if args.start_year is not None else root_cfg.START_YEAR
     effective_mode = args.mode or root_cfg.DOWNLOAD_MODE
     effective_output_type = args.output_type or root_cfg.OUTPUT_TYPE
+    # Resolve the source location once, so the download (integration) side and
+    # the processing side act on the same effective inputs rather than each
+    # recomputing them from the environment.
+    effective_remote_store = _resolve_remote_store(args, root_cfg)
 
     if not args.skip_download:
         _check_config_file()
@@ -239,7 +243,12 @@ def pipeline_main() -> None:
 
     processing_config = None
     if not args.skip_process:
+        # Build the single resolved runtime config from the effective inputs and
+        # validate that — not a separately-populated environment default — so a
+        # bad CLI --aco / --file-store fails closed before any work starts.
         processing_config = root_cfg.runtime_config(
+            ACO_ID=effective_aco,
+            FILE_STORE=effective_remote_store or str(args.download_dir),
             OUTPUT_TYPE=effective_output_type,
             FULL_REFRESH=True if args.full_refresh else root_cfg.FULL_REFRESH,
         )
@@ -260,7 +269,7 @@ def pipeline_main() -> None:
             download_mode=effective_mode,
             cli_path=cli_path,
             state_file=Path(args.state_file),
-            remote_store=_resolve_remote_store(args, root_cfg),
+            remote_store=effective_remote_store,
             reset_state=args.reset_state,
             skip_download=args.skip_download,
             skip_process=args.skip_process,

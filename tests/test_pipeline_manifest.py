@@ -180,6 +180,11 @@ def test_pipeline_manifest_redacts_remote_store(tmp_path):
     with patch("mssp_pipeline.integration.downloader.Downloader"), patch(
         "mssp_pipeline.integration.state.StateManager"
     ), patch("mssp_pipeline.processing.run"):
+        # skip_download keeps this focused on manifest redaction: the run records
+        # (and redacts) the remote_store param regardless of the download phase.
+        # An https SAS URL is not a supported remote store — the ingest side now
+        # fails it closed — so exercising redaction must not route it through the
+        # download Config.
         pipeline_run(
             aco="C1234",
             start_year=2025,
@@ -188,6 +193,7 @@ def test_pipeline_manifest_redacts_remote_store(tmp_path):
             run_id="redacted-run",
             manifest_dir=manifest_dir,
             remote_store=sas_url,
+            skip_download=True,
         )
 
     manifest = RunManifest.load("redacted-run", manifest_dir=manifest_dir)

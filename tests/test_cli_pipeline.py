@@ -375,3 +375,70 @@ def test_runs_main_rejects_invalid_run_id(monkeypatch, tmp_path, capsys):
         cli.runs_main()
 
     assert "Invalid run id" in capsys.readouterr().out
+
+
+def test_pipeline_main_propagates_cli_aco_and_file_store_to_processing(monkeypatch):
+    """One resolved config: the CLI-effective ACO and file store reach processing.
+
+    Before this, pipeline_main validated a processing config built from the
+    environment defaults while the download side resolved --aco / --file-store
+    separately, so integration and processing could act on different inputs.
+    """
+    _install_fake_dotenv(monkeypatch)
+    monkeypatch.setattr(cli, "_check_config_file", lambda: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "mssp-pipeline",
+            "--aco",
+            "C1234",
+            "--file-store",
+            "s3://cli-bucket/prefix",
+            "--start-year",
+            "2025",
+            "--output-type",
+            "PARQUET",
+            "--skip-download",
+        ],
+    )
+
+    with patch("mssp_pipeline.pipeline.run") as pipeline_run_mock:
+        cli.pipeline_main()
+
+    kwargs = pipeline_run_mock.call_args.kwargs
+    processing_config = kwargs["processing_config"]
+    # The same resolved values reach both the integration side (remote_store)
+    # and the processing side (processing_config), computed once.
+    assert processing_config.ACO_ID == "C1234"
+    assert processing_config.FILE_STORE == "s3://cli-bucket/prefix"
+    assert kwargs["remote_store"] == "s3://cli-bucket/prefix"
+
+
+def test_pipeline_main_fails_closed_on_invalid_cli_file_store(monkeypatch, capsys):
+    """A bad --file-store must stop the run before pipeline.run, not slip through
+    unvalidated because validation ran against the environment default."""
+    _install_fake_dotenv(monkeypatch)
+    monkeypatch.setattr(cli, "_check_config_file", lambda: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "mssp-pipeline",
+            "--aco",
+            "C1234",
+            "--file-store",
+            "ftp://evil/prefix",
+            "--start-year",
+            "2025",
+            "--output-type",
+            "PARQUET",
+            "--skip-download",
+        ],
+    )
+
+    with patch("mssp_pipeline.pipeline.run") as pipeline_run_mock:
+        with pytest.raises(SystemExit):
+            cli.pipeline_main()
+
+    pipeline_run_mock.assert_not_called()
