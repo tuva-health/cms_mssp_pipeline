@@ -23,7 +23,8 @@ build/
 
 # uv
 .uv/
-uv.lock
+# uv.lock is committed on purpose: the image builds `uv sync --frozen` from it,
+# so a clean checkout reproduces the same dependency set.
 
 # Environment
 .env

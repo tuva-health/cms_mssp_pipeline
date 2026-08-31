@@ -1,0 +1,5 @@
+# Standard secret scanning: extend the gitleaks default ruleset. No
+# client-specific allowlist lives upstream -- a downstream overlay owns any
+# private .gitleaksignore entries it needs.
+[extend]
+useDefault = true
