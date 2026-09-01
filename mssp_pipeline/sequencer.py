@@ -40,6 +40,8 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import sys
+import time
 from dataclasses import dataclass, field
 from typing import Callable, Mapping, Protocol, Sequence
 
@@ -204,9 +206,9 @@ ReadinessSource = Callable[[Stage], Mapping[str, str]]
 OutputSource = Callable[[Stage], Mapping[str, Mapping[str, str]]]
 
 
-def _monotonic_seconds() -> int:
-    import time
-
+def _epoch_seconds() -> int:
+    # Wall-clock (epoch) is intentional: a lease TTL is compared across separate
+    # orchestrator processes/hosts, where time.monotonic() would be meaningless.
     return int(time.time())
 
 
@@ -227,7 +229,7 @@ class Sequencer:
         config: SequencerConfig,
         readiness_source: ReadinessSource,
         output_source: OutputSource | None = None,
-        clock: Callable[[], int] = _monotonic_seconds,
+        clock: Callable[[], int] = _epoch_seconds,
     ) -> None:
         self._ecs = ecs
         self._lease = lease
@@ -420,7 +422,7 @@ class BotoEcsClient:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
+@dataclass(frozen=True)
 class SequencerJob:
     """What a plan provider returns: a fully wired sequencer and the plan to
     run. The A overlay writes the provider (concrete plan, real ECS client, real
@@ -466,7 +468,7 @@ def sequence_main(argv: Sequence[str] | None = None) -> int:
     provider = _load_provider(args.plan_provider)
     job = provider()
     result = job.sequencer.run(job.plan)
-    stream = None if result.ok else __import__("sys").stderr
+    stream = None if result.ok else sys.stderr
     print(result.summary(), file=stream)
     return 0 if result.ok else 1
 
