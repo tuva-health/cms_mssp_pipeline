@@ -203,9 +203,21 @@ check_render_env() {
 
 check_register_inputs() {
   local out_dir="$CLIENT_DIR/rendered"
-  require_file "$out_dir/taskdef-runtime.json"
-  require_file "$out_dir/taskdef-bootstrap.json"
-  echo "[ok] Rendered taskdefs found in $out_dir"
+  local ecs_dir="$ROOT_DIR/infra/aws/ecs"
+  # Generic: every taskdef template discovered in the ECS dir must have a
+  # corresponding rendered file (not just a hardcoded runtime/bootstrap pair).
+  local found=0
+  local tpl
+  for tpl in "$ecs_dir"/taskdef-*.json; do
+    [[ -e "$tpl" ]] || continue
+    found=1
+    require_file "$out_dir/$(basename "$tpl")"
+  done
+  if (( found == 0 )); then
+    echo "[error] No taskdef templates found in $ecs_dir" >&2
+    exit 1
+  fi
+  echo "[ok] Rendered taskdefs found in $out_dir for every template in $ecs_dir"
 }
 
 check_activate_remote_state_keys_if_needed() {

@@ -1,4 +1,5 @@
 {
+  "x-mssp-render": { "augment": "output-backend" },
   "family": "mssp-pipeline-runtime",
   "networkMode": "awsvpc",
   "requiresCompatibilities": ["FARGATE"],

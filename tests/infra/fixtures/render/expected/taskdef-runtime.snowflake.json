@@ -1,0 +1,170 @@
+{
+  "family": "mssp-pipeline-runtime",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "4096",
+  "memory": "30720",
+  "ephemeralStorage": {
+    "sizeInGiB": 100
+  },
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  },
+  "executionRoleArn": "arn:aws:iam::111122223333:role/mssp-pipeline-ecs-task-execution-role",
+  "taskRoleArn": "arn:aws:iam::111122223333:role/mssp-pipeline-runtime-task-role",
+  "containerDefinitions": [
+    {
+      "name": "readiness-gates",
+      "image": "111122223333.dkr.ecr.us-east-1.amazonaws.com/mssp-pipeline@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "essential": false,
+      "command": [
+        "python",
+        "-m",
+        "mssp_pipeline.readiness",
+        "bootstrap",
+        "whitelist"
+      ],
+      "environment": [
+        {
+          "name": "AWS_REGION",
+          "value": "us-east-1"
+        },
+        {
+          "name": "MSSP_OUTPUT_TYPE",
+          "value": "SNOWFLAKE"
+        },
+        {
+          "name": "MSSP_OUTPUT_LOCATION",
+          "value": "s3://example-mssp-bucket/processed/output"
+        },
+        {
+          "name": "MSSP_TEMP_LOCATION",
+          "value": "/tmp/mssp-staging"
+        },
+        {
+          "name": "MSSP_DOWNLOAD_MODE",
+          "value": "incremental"
+        },
+        {
+          "name": "SNOWFLAKE_USERNAME",
+          "value": "svc_mssp"
+        },
+        {
+          "name": "SNOWFLAKE_ACCOUNT",
+          "value": "acme-org.us-east-1"
+        },
+        {
+          "name": "SNOWFLAKE_DATABASE",
+          "value": "MSSP"
+        },
+        {
+          "name": "SNOWFLAKE_SCHEMA",
+          "value": "RAW_DATA"
+        },
+        {
+          "name": "SNOWFLAKE_COMPUTE_WAREHOUSE",
+          "value": "COMPUTE_WH"
+        },
+        {
+          "name": "SNOWFLAKE_ACCOUNT_ROLE",
+          "value": "ACCOUNTADMIN"
+        },
+        {
+          "name": "SNOWFLAKE_RSA_KEY_PATH",
+          "value": "/tmp/snowflake_rsa_key.p8"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/mssp-pipeline",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "readiness"
+        }
+      },
+      "secrets": [
+        {
+          "name": "SNOWFLAKE_RSA_KEY",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:111122223333:secret:mssp/snowflake/rsa-key-DDDDDD"
+        },
+        {
+          "name": "SNOWFLAKE_RSA_KEY_PASSPHRASE",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:111122223333:secret:mssp/snowflake/rsa-key-passphrase-EEEEEE"
+        }
+      ]
+    },
+    {
+      "name": "mssp-runtime",
+      "image": "111122223333.dkr.ecr.us-east-1.amazonaws.com/mssp-pipeline@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "essential": true,
+      "command": [
+        "mssp-pipeline"
+      ],
+      "dependsOn": [
+        {
+          "containerName": "readiness-gates",
+          "condition": "SUCCESS"
+        }
+      ],
+      "environment": [
+        {
+          "name": "MSSP_WORKDIR",
+          "value": "/app"
+        },
+        {
+          "name": "MSSP_WRITE_CONFIG_TXT",
+          "value": "auto"
+        },
+        {
+          "name": "MSSP_CLI_PATH",
+          "value": "/app/bin/acoms-cli"
+        },
+        {
+          "name": "MSSP_ACO_ID",
+          "value": "A9999"
+        },
+        {
+          "name": "MSSP_FILE_STORE",
+          "value": "s3://example-mssp-bucket/raw/input"
+        },
+        {
+          "name": "MSSP_OUTPUT_TYPE",
+          "value": "PARQUET"
+        },
+        {
+          "name": "MSSP_OUTPUT_LOCATION",
+          "value": "s3://example-mssp-bucket/processed/output"
+        },
+        {
+          "name": "MSSP_TEMP_LOCATION",
+          "value": "/tmp/mssp-staging"
+        },
+        {
+          "name": "MSSP_DOWNLOAD_MODE",
+          "value": "incremental"
+        },
+        {
+          "name": "AWS_REGION",
+          "value": "us-east-1"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "ACOMS_CONFIG_TXT",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:111122223333:secret:mssp/acoms-config-AAAAAA"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/mssp-pipeline",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "runtime"
+        }
+      }
+    }
+  ]
+}

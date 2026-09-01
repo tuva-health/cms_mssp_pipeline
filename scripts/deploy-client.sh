@@ -91,11 +91,6 @@ render_taskdefs() {
   local out_dir="$CLIENT_DIR/rendered"
   mkdir -p "$out_dir"
 
-  local runtime_tpl="$ROOT_DIR/infra/aws/ecs/taskdef-runtime.json"
-  local bootstrap_tpl="$ROOT_DIR/infra/aws/ecs/taskdef-bootstrap.json"
-  local runtime_out="$out_dir/taskdef-runtime.json"
-  local bootstrap_out="$out_dir/taskdef-bootstrap.json"
-
   local cms_api_key_secret_arn cms_api_secret_secret_arn acoms_config_secret_arn
   local output_type snowflake_rsa_key_secret_arn snowflake_rsa_key_passphrase_secret_arn
   cms_api_key_secret_arn="$(resolve_secret_arn mssp/cms-api-key)"
@@ -118,161 +113,23 @@ render_taskdefs() {
   export SNOWFLAKE_RSA_KEY_SECRET_ARN="$snowflake_rsa_key_secret_arn"
   export SNOWFLAKE_RSA_KEY_PASSPHRASE_SECRET_ARN="$snowflake_rsa_key_passphrase_secret_arn"
 
-  python3 - "$runtime_tpl" "$runtime_out" <<'PY'
-import json, os, re, sys
-src, dst = sys.argv[1], sys.argv[2]
-text = open(src, 'r', encoding='utf-8').read()
-
-bucket = os.environ.get('FILE_STORE_BUCKET', '').strip()
-file_store_prefix = os.environ.get('FILE_STORE_PREFIX', '').strip().strip('/')
-output_prefix = os.environ.get('OUTPUT_PREFIX', '').strip().strip('/')
-project_name = os.environ.get('PROJECT_NAME', 'mssp-pipeline').strip() or 'mssp-pipeline'
-account_id = os.environ.get('ACCOUNT_ID', '')
-region = os.environ.get('REGION', '')
-output_type = os.environ.get('MSSP_OUTPUT_TYPE', 'PARQUET').strip().upper() or 'PARQUET'
-output_location_override = os.environ.get('MSSP_OUTPUT_LOCATION', '').strip()
-temp_location = os.environ.get('MSSP_TEMP_LOCATION', '/tmp/mssp-staging').strip() or '/tmp/mssp-staging'
-download_mode = os.environ.get('MSSP_DOWNLOAD_MODE', 'incremental').strip() or 'incremental'
-aco_id = os.environ.get('ACO_ID', '').strip()
-
-if not bucket:
-    raise SystemExit('FILE_STORE_BUCKET is required for runtime taskdef render')
-
-def s3_uri(b: str, p: str) -> str:
-    return f"s3://{b}" if not p else f"s3://{b}/{p}"
-
-def role_arn(role_suffix: str) -> str:
-    return f"arn:aws:iam::{account_id}:role/{project_name}-{role_suffix}"
-
-repl = {
-    '<ACCOUNT_ID>': account_id,
-    '<REGION>': region,
-    '<PIPELINE_IMAGE_URI>': os.environ.get('PIPELINE_IMAGE', ''),
-    '<ACO_ID>': aco_id,
-    '<FILE_STORE_URI>': s3_uri(bucket, file_store_prefix),
-    '<OUTPUT_URI>': output_location_override or s3_uri(bucket, output_prefix),
-    '<TASK_EXECUTION_ROLE_ARN>': role_arn('ecs-task-execution-role'),
-    '<RUNTIME_TASK_ROLE_ARN>': role_arn('runtime-task-role'),
-    '<ACOMS_CONFIG_SECRET_ARN>': os.environ.get('ACOMS_CONFIG_SECRET_ARN', ''),
-}
-for k, v in repl.items():
-    text = text.replace(k, v)
-left = re.findall(r'<[^>]+>', text)
-if left:
-    raise SystemExit(f'Unresolved placeholders in runtime taskdef: {sorted(set(left))}')
-
-doc = json.loads(text)
-container = doc['containerDefinitions'][0]
-
-env_entries = {item['name']: item for item in container.get('environment', [])}
-env_entries['MSSP_OUTPUT_TYPE'] = {'name': 'MSSP_OUTPUT_TYPE', 'value': output_type}
-env_entries['MSSP_OUTPUT_LOCATION'] = {
-    'name': 'MSSP_OUTPUT_LOCATION',
-    'value': output_location_override or s3_uri(bucket, output_prefix),
-}
-env_entries['MSSP_TEMP_LOCATION'] = {'name': 'MSSP_TEMP_LOCATION', 'value': temp_location}
-env_entries['MSSP_DOWNLOAD_MODE'] = {'name': 'MSSP_DOWNLOAD_MODE', 'value': download_mode}
-
-def require_env(name: str) -> str:
-    value = os.environ.get(name, '').strip()
-    if not value:
-        raise SystemExit(f'{name} is required for runtime taskdef render when MSSP_OUTPUT_TYPE={output_type}')
-    return value
-
-extra_secrets = []
-if output_type == 'SNOWFLAKE':
-    snowflake_env = {
-        'SNOWFLAKE_USERNAME': require_env('SNOWFLAKE_USERNAME'),
-        'SNOWFLAKE_ACCOUNT': require_env('SNOWFLAKE_ACCOUNT'),
-        'SNOWFLAKE_DATABASE': require_env('SNOWFLAKE_DATABASE'),
-        'SNOWFLAKE_SCHEMA': require_env('SNOWFLAKE_SCHEMA'),
-        'SNOWFLAKE_COMPUTE_WAREHOUSE': require_env('SNOWFLAKE_COMPUTE_WAREHOUSE'),
-        'SNOWFLAKE_ACCOUNT_ROLE': require_env('SNOWFLAKE_ACCOUNT_ROLE'),
-    }
-    for name, value in snowflake_env.items():
-        env_entries[name] = {'name': name, 'value': value}
-    env_entries['SNOWFLAKE_RSA_KEY_PATH'] = {
-        'name': 'SNOWFLAKE_RSA_KEY_PATH',
-        'value': '/tmp/snowflake_rsa_key.p8',
-    }
-    key_secret_arn = os.environ.get('SNOWFLAKE_RSA_KEY_SECRET_ARN', '').strip()
-    if not key_secret_arn:
-        raise SystemExit('SNOWFLAKE_RSA_KEY_SECRET_ARN is required for SNOWFLAKE runtime render')
-    extra_secrets.append({'name': 'SNOWFLAKE_RSA_KEY', 'valueFrom': key_secret_arn})
-    passphrase_secret_arn = os.environ.get('SNOWFLAKE_RSA_KEY_PASSPHRASE_SECRET_ARN', '').strip()
-    if passphrase_secret_arn:
-        extra_secrets.append({'name': 'SNOWFLAKE_RSA_KEY_PASSPHRASE', 'valueFrom': passphrase_secret_arn})
-
-container['environment'] = list(env_entries.values())
-existing_secret_names = {item['name'] for item in container.get('secrets', [])}
-for secret in extra_secrets:
-    if secret['name'] not in existing_secret_names:
-        container.setdefault('secrets', []).append(secret)
-
-with open(dst, 'w', encoding='utf-8') as f:
-    json.dump(doc, f, indent=2)
-    f.write('\n')
-print(dst)
-PY
-
-  python3 - "$bootstrap_tpl" "$bootstrap_out" <<'PY'
-import os, re, sys
-src, dst = sys.argv[1], sys.argv[2]
-text = open(src, 'r', encoding='utf-8').read()
-project_name = os.environ.get('PROJECT_NAME', 'mssp-pipeline').strip() or 'mssp-pipeline'
-account_id = os.environ.get('ACCOUNT_ID', '')
-
-def role_arn(role_suffix: str) -> str:
-    return f"arn:aws:iam::{account_id}:role/{project_name}-{role_suffix}"
-
-repl = {
-    '<ACCOUNT_ID>': account_id,
-    '<REGION>': os.environ.get('REGION', ''),
-    '<PIPELINE_IMAGE_URI>': os.environ.get('PIPELINE_IMAGE', ''),
-    '<NAT_EIP_OR_EMPTY>': os.environ.get('NAT_EIP_OR_EMPTY', ''),
-    '<TASK_EXECUTION_ROLE_ARN>': role_arn('ecs-task-execution-role'),
-    '<BOOTSTRAP_TASK_ROLE_ARN>': role_arn('bootstrap-task-role'),
-    '<CMS_API_KEY_SECRET_ARN>': os.environ.get('CMS_API_KEY_SECRET_ARN', ''),
-    '<CMS_API_SECRET_SECRET_ARN>': os.environ.get('CMS_API_SECRET_SECRET_ARN', ''),
-}
-for k, v in repl.items():
-    text = text.replace(k, v)
-left = re.findall(r'<[^>]+>', text)
-if left:
-    raise SystemExit(f'Unresolved placeholders in bootstrap taskdef: {sorted(set(left))}')
-open(dst, 'w', encoding='utf-8').write(text)
-print(dst)
-PY
+  # Generic, data-driven render: every taskdef-*.json template in the ECS dir
+  # is discovered and rendered by the same engine (see scripts/render_taskdefs.py).
+  # Templates opt into output-backend augmentation via the "x-mssp-render" marker;
+  # unresolved <PLACEHOLDER>s fail the render closed.
+  python3 "$ROOT_DIR/scripts/render_taskdefs.py" render "$ROOT_DIR/infra/aws/ecs" "$out_dir"
 
   echo "Rendered task definitions in: $out_dir"
 }
 
 register_taskdefs() {
   local out_dir="$CLIENT_DIR/rendered"
-  local runtime_json="$out_dir/taskdef-runtime.json"
-  local bootstrap_json="$out_dir/taskdef-bootstrap.json"
-  [[ -f "$runtime_json" && -f "$bootstrap_json" ]] || {
-    echo "Rendered taskdefs not found. Run render-taskdefs first." >&2
-    exit 1
-  }
-  local bootstrap_arn runtime_arn
-  bootstrap_arn="$(aws ecs register-task-definition --cli-input-json "file://$bootstrap_json" \
-    --query 'taskDefinition.taskDefinitionArn' --output text)"
-  runtime_arn="$(aws ecs register-task-definition --cli-input-json "file://$runtime_json" \
-    --query 'taskDefinition.taskDefinitionArn' --output text)"
-  # Record the EXACT registered revisions so activate binds to them, never to a
-  # mutable "latest" family lookup.
-  python3 - "$out_dir/task-definition-arns.json" "$bootstrap_arn" "$runtime_arn" <<'PY'
-import json, sys
-path, bootstrap_arn, runtime_arn = sys.argv[1:]
-json.dump(
-    {"mssp-pipeline-bootstrap": bootstrap_arn, "mssp-pipeline-runtime": runtime_arn},
-    open(path, "w"),
-    indent=2,
-)
-open(path, "a").write("\n")
-PY
-  echo "Registered ECS task definitions (bootstrap + runtime) at exact revisions."
+  # Register every rendered taskdef-*.json and record the EXACT registered
+  # revision per family in task-definition-arns.json, so activate binds to
+  # recorded revisions, never to a mutable "latest" family lookup.
+  python3 "$ROOT_DIR/scripts/render_taskdefs.py" register \
+    "$out_dir" "$out_dir/task-definition-arns.json"
+  echo "Registered all rendered ECS task definitions at exact revisions."
 }
 
 terraform_apply() {
