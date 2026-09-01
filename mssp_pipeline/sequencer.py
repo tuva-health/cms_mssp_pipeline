@@ -55,6 +55,16 @@ from mssp_pipeline.release_identity import verify_image, verify_task_revision
 # ---------------------------------------------------------------------------
 
 
+class LaunchError(RuntimeError):
+    """An ECS task could not be launched (``run-task`` reported failures).
+
+    Raised by an :class:`EcsClient` when a launch is rejected before the task
+    ever starts (capacity, subnet, taskdef, permissions). The sequencer converts
+    it to a clean halt -- distinct from a task that launched and then exited
+    non-zero.
+    """
+
+
 @dataclass(frozen=True)
 class TaskIdentity:
     """The exact identity the ECS control plane resolves for a taskdef family:
@@ -120,8 +130,11 @@ class Stage:
     * ``taskdef_family`` -- the ECS taskdef family to run for this stage.
     * ``readiness`` -- the named-gate policy that must pass before launch
       (an empty policy is vacuously ready).
-    * ``expected_image`` / ``expected_task_revision`` -- optional exact-identity
+    * ``expected_image`` / ``expected_task_revision`` -- exact-identity
       expectations checked against what the ECS client resolves for the family.
+      At least one is required (enforced at plan validation): the engine is
+      fail-closed and never launches an image it has not verified as an exact
+      digest / revision. Either may be omitted individually, but not both.
     * ``output_contract`` -- an optional accepted-output contract verified after
       the task succeeds.
     """
@@ -150,6 +163,13 @@ class StagePlan:
             if stage.name in seen:
                 raise ValueError(f"duplicate stage name {stage.name!r}")
             seen.add(stage.name)
+            # Fail-closed: a stage that declares no exact image/task identity
+            # would launch an unverified (possibly mutable-tag) image.
+            if stage.expected_image is None and stage.expected_task_revision is None:
+                raise ValueError(
+                    f"stage {stage.name!r} declares no image-identity expectation "
+                    "(set expected_image and/or expected_task_revision)"
+                )
 
 
 @dataclass(frozen=True)
@@ -170,6 +190,7 @@ class SequencerConfig:
 GATE_LEASE = "lease"
 GATE_READINESS = "readiness"
 GATE_IMAGE_IDENTITY = "image-identity"
+GATE_LAUNCH = "launch"
 GATE_TASK = "task"
 GATE_OUTPUT_CONTRACT = "output-contract"
 
@@ -242,25 +263,46 @@ class Sequencer:
         cfg = self._config
         outcomes: list[StageOutcome] = []
         acquired = False
+        # Per-run fencing base: the wall-clock (epoch) acquisition time. It fixes
+        # the run's recency once, at the start -- a later run gets a strictly
+        # larger base -- so a stale redrive can never out-fence a fresher run
+        # (unlike a stage-index token, which restarts at the same value every run
+        # and gives no cross-run ordering). The lease primitive requires each
+        # refresh's token to strictly ADVANCE (see lease.refresh), so within the
+        # run we offset the fixed base by the stage index: base, base+1, base+2.
+        # The base dominates the (small) stage offset, preserving cross-run order.
+        run_token_base: int | None = None
         try:
             for index, stage in enumerate(plan.stages):
-                # 1. lease: acquire on the first stage, refresh thereafter.
+                # 1. lease: acquire on the first stage, refresh thereafter,
+                #    carrying the per-run fencing base (offset by stage index).
                 try:
                     if not acquired:
+                        now = self._clock()
                         self._lease.acquire(
                             cfg.lease_name,
                             owner=cfg.owner,
-                            now=self._clock(),
+                            now=now,
                             ttl=cfg.lease_ttl,
                         )
                         acquired = True
+                        run_token_base = now
+                        # Stamp the fencing base immediately (acquire cannot carry
+                        # a token), so the run's recency is recorded from stage 0.
+                        self._lease.refresh(
+                            cfg.lease_name,
+                            owner=cfg.owner,
+                            now=now,
+                            ttl=cfg.lease_ttl,
+                            fencing_token=run_token_base,
+                        )
                     else:
                         self._lease.refresh(
                             cfg.lease_name,
                             owner=cfg.owner,
                             now=self._clock(),
                             ttl=cfg.lease_ttl,
-                            fencing_token=index,
+                            fencing_token=run_token_base + index,
                         )
                 except LeaseError as exc:
                     outcomes.append(
@@ -294,11 +336,18 @@ class Sequencer:
                     )
                     return SequenceResult(False, tuple(outcomes))
 
-                # 4. launch + wait.
-                task_arn = self._ecs.run_task(
-                    cluster=cfg.cluster,
-                    task_definition=identity.task_definition_arn,
-                )
+                # 4. launch + wait. A launch that is rejected before the task
+                #    starts (LaunchError) halts as cleanly as any other gate.
+                try:
+                    task_arn = self._ecs.run_task(
+                        cluster=cfg.cluster,
+                        task_definition=identity.task_definition_arn,
+                    )
+                except LaunchError as exc:
+                    outcomes.append(
+                        StageOutcome(stage.name, False, GATE_LAUNCH, str(exc))
+                    )
+                    return SequenceResult(False, tuple(outcomes))
                 task_result = self._ecs.wait_for_stopped(
                     cluster=cfg.cluster, task_arn=task_arn
                 )
@@ -398,8 +447,11 @@ class BotoEcsClient:
         resp = self._ecs.run_task(**kwargs)
         failures = resp.get("failures") or []
         if failures:
-            raise RuntimeError(f"run-task failed: {failures}")
-        return resp["tasks"][0]["taskArn"]
+            raise LaunchError(f"run-task failed: {failures}")
+        tasks = resp.get("tasks") or []
+        if not tasks:
+            raise LaunchError("run-task returned no tasks and no failures")
+        return tasks[0]["taskArn"]
 
     def wait_for_stopped(self, *, cluster: str, task_arn: str) -> TaskResult:
         waiter = self._ecs.get_waiter("tasks_stopped")

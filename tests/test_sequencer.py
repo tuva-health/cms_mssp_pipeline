@@ -13,7 +13,9 @@ import pytest
 from mssp_pipeline.lease import InMemoryLeaseStore
 from mssp_pipeline.output_contract import AcceptedOutputContract
 from mssp_pipeline.readiness import ReadinessPolicy
+from mssp_pipeline.lease import LeaseUnavailable
 from mssp_pipeline.sequencer import (
+    LaunchError,
     SequencerConfig,
     Sequencer,
     Stage,
@@ -46,9 +48,11 @@ class FakeEcsClient:
         self,
         identities: dict[str, TaskIdentity],
         exit_codes: dict[str, int] | None = None,
+        launch_failures: tuple[str, ...] = (),
     ) -> None:
         self._identities = identities
         self._exit_codes = exit_codes or {}
+        self._launch_failures = frozenset(launch_failures)
         self.describe_calls: list[str] = []
         self.run_order: list[str] = []
         self._running: dict[str, str] = {}  # task_arn -> family
@@ -63,6 +67,10 @@ class FakeEcsClient:
             f for f, ident in self._identities.items()
             if ident.task_definition_arn == task_definition
         )
+        if family in self._launch_failures:
+            # Mirror a real ECS run-task rejection (capacity, subnet, ...): the
+            # task never starts, so it is NOT appended to run_order.
+            raise LaunchError(f"run-task failed for {family}: CapacityUnavailable")
         self.run_order.append(family)
         task_arn = f"arn:aws:ecs:{REGION}:{ACCOUNT}:task/{cluster}/{family}-run"
         self._running[task_arn] = family
@@ -99,6 +107,19 @@ def _ready(_stage: Stage) -> dict[str, str]:
     return {}
 
 
+def _stage(name: str, taskdef_family: str | None = None, **kwargs) -> Stage:
+    """Build a Stage that satisfies the fail-closed identity rule by default.
+
+    Unless the caller declares an identity expectation explicitly, pin the
+    stage to the exact image the fake resolves for its family, so plans built
+    in tests are valid without repeating the digest everywhere.
+    """
+    family = taskdef_family if taskdef_family is not None else name
+    if "expected_image" not in kwargs and "expected_task_revision" not in kwargs:
+        kwargs["expected_image"] = _image(family)
+    return Stage(name=name, taskdef_family=family, **kwargs)
+
+
 class Clock:
     def __init__(self) -> None:
         self.t = 0
@@ -116,9 +137,9 @@ def test_ordered_success_runs_every_stage_in_order() -> None:
     store = InMemoryLeaseStore()
     plan = StagePlan(
         stages=(
-            Stage(name="download", taskdef_family="download"),
-            Stage(name="raw", taskdef_family="raw"),
-            Stage(name="dbt", taskdef_family="dbt"),
+            _stage(name="download", taskdef_family="download"),
+            _stage(name="raw", taskdef_family="raw"),
+            _stage(name="dbt", taskdef_family="dbt"),
         )
     )
     seq = Sequencer(
@@ -144,7 +165,7 @@ def seq_expected(stage: Stage, gate: str) -> str:
 def test_lease_is_released_after_a_successful_run() -> None:
     ecs = FakeEcsClient(_identities("download"))
     store = InMemoryLeaseStore()
-    plan = StagePlan(stages=(Stage(name="download", taskdef_family="download"),))
+    plan = StagePlan(stages=(_stage(name="download", taskdef_family="download"),))
     seq = Sequencer(
         ecs=ecs, lease=store, config=_config(), readiness_source=_ready, clock=Clock()
     )
@@ -166,9 +187,9 @@ def test_mid_sequence_task_failure_halts_and_skips_later_stages() -> None:
     store = InMemoryLeaseStore()
     plan = StagePlan(
         stages=(
-            Stage(name="download", taskdef_family="download"),
-            Stage(name="raw", taskdef_family="raw"),
-            Stage(name="dbt", taskdef_family="dbt"),
+            _stage(name="download", taskdef_family="download"),
+            _stage(name="raw", taskdef_family="raw"),
+            _stage(name="dbt", taskdef_family="dbt"),
         )
     )
     seq = Sequencer(
@@ -196,7 +217,7 @@ def test_readiness_gate_blocks_before_launch() -> None:
     store = InMemoryLeaseStore()
     plan = StagePlan(
         stages=(
-            Stage(
+            _stage(
                 name="raw",
                 taskdef_family="raw",
                 readiness=ReadinessPolicy({"bootstrap": "true"}),
@@ -278,7 +299,7 @@ def test_output_contract_gate_blocks_after_a_successful_task() -> None:
     )
     plan = StagePlan(
         stages=(
-            Stage(name="raw", taskdef_family="raw", output_contract=contract),
+            _stage(name="raw", taskdef_family="raw", output_contract=contract),
         )
     )
     # Output source produces the wrong placement -> a contract violation.
@@ -305,7 +326,7 @@ def test_output_contract_passes_when_produced_matches() -> None:
     placement = {"database": "DB_DEV", "schema": "RAW"}
     contract = AcceptedOutputContract({"raw_dev": placement})
     plan = StagePlan(
-        stages=(Stage(name="raw", taskdef_family="raw", output_contract=contract),)
+        stages=(_stage(name="raw", taskdef_family="raw", output_contract=contract),)
     )
     seq = Sequencer(
         ecs=ecs,
@@ -328,7 +349,7 @@ def test_second_concurrent_run_is_rejected() -> None:
     # Another executor already holds a live lease on the same name.
     store.acquire("run-lease", owner="other-exec", now=0, ttl=10_000)
 
-    plan = StagePlan(stages=(Stage(name="download", taskdef_family="download"),))
+    plan = StagePlan(stages=(_stage(name="download", taskdef_family="download"),))
     seq = Sequencer(
         ecs=ecs, lease=store, config=_config(), readiness_source=_ready, clock=Clock()
     )
@@ -347,8 +368,8 @@ def test_lease_is_refreshed_between_stages_with_advancing_fencing_token() -> Non
     store = InMemoryLeaseStore()
     plan = StagePlan(
         stages=(
-            Stage(name="download", taskdef_family="download"),
-            Stage(name="raw", taskdef_family="raw"),
+            _stage(name="download", taskdef_family="download"),
+            _stage(name="raw", taskdef_family="raw"),
         )
     )
     seq = Sequencer(
@@ -372,10 +393,162 @@ def test_duplicate_stage_name_is_rejected() -> None:
     with pytest.raises(ValueError):
         StagePlan(
             stages=(
-                Stage(name="raw", taskdef_family="raw"),
-                Stage(name="raw", taskdef_family="raw2"),
+                _stage(name="raw", taskdef_family="raw"),
+                _stage(name="raw", taskdef_family="raw2"),
             )
         )
+
+
+def test_stage_without_any_image_identity_expectation_is_rejected() -> None:
+    # Fail-closed: a stage that pins neither an image digest nor a task revision
+    # would launch an unverified (possibly mutable-tag) image -> plan is invalid.
+    with pytest.raises(ValueError, match="image-identity"):
+        StagePlan(stages=(Stage(name="raw", taskdef_family="raw"),))
+
+
+def test_stage_with_only_a_task_revision_expectation_is_valid() -> None:
+    # Declaring just one of the two identity expectations is enough.
+    plan = StagePlan(
+        stages=(
+            Stage(
+                name="raw",
+                taskdef_family="raw",
+                expected_task_revision=_arn("raw", 1),
+            ),
+        )
+    )
+    assert len(plan.stages) == 1
+
+
+# --- fencing token: monotonic across runs ------------------------------------
+
+
+class SpyLeaseBackend:
+    """A lease backend that records the fencing tokens passed to refresh,
+    delegating the actual conditional semantics to the real in-memory store."""
+
+    def __init__(self) -> None:
+        self._inner = InMemoryLeaseStore()
+        self.refresh_tokens: list[int | None] = []
+
+    def acquire(self, name, *, owner, now, ttl):
+        return self._inner.acquire(name, owner=owner, now=now, ttl=ttl)
+
+    def refresh(self, name, *, owner, now, ttl, fencing_token=None):
+        self.refresh_tokens.append(fencing_token)
+        return self._inner.refresh(
+            name, owner=owner, now=now, ttl=ttl, fencing_token=fencing_token
+        )
+
+    def release(self, name, *, owner):
+        return self._inner.release(name, owner=owner)
+
+    def get(self, name):
+        return self._inner.get(name)
+
+
+def _tokens_for_run_acquired_at(epoch: int) -> list[int | None]:
+    ecs = FakeEcsClient(_identities("download", "raw"))
+    spy = SpyLeaseBackend()
+    plan = StagePlan(
+        stages=(
+            _stage(name="download", taskdef_family="download"),
+            _stage(name="raw", taskdef_family="raw"),
+        )
+    )
+    seq = Sequencer(
+        ecs=ecs,
+        lease=spy,
+        config=_config(),
+        readiness_source=_ready,
+        clock=lambda: epoch,  # a run's acquisition epoch is fixed
+    )
+    assert seq.run(plan).ok is True
+    return spy.refresh_tokens
+
+
+def test_fencing_token_base_is_the_epoch_and_monotonic_across_runs() -> None:
+    early = _tokens_for_run_acquired_at(100)
+    late = _tokens_for_run_acquired_at(500)
+
+    # Within a run the token strictly advances (the lease primitive requires it).
+    assert all(a < b for a, b in zip(early, early[1:]))
+    assert all(a < b for a, b in zip(late, late[1:]))
+    # The base is the acquisition epoch, not a per-run-restarting stage index.
+    assert min(early) == 100
+    assert min(late) == 500
+    # Cross-run: every token of the later run exceeds every token of the earlier
+    # run -> a stale redrive can never out-fence a fresher run. (A stage-index
+    # token would give both runs the same values and fail this.)
+    assert max(early) < min(late)
+
+
+def test_stale_run_cannot_retake_after_a_newer_run_acquired() -> None:
+    # The property the sequencer's epoch-based token guarantees, shown against
+    # the real lease store: a run that started earlier (smaller epoch base)
+    # loses a re-take to one that started later, even as the same logical owner
+    # (a redrive of the same job).
+    store = InMemoryLeaseStore()
+    owner = "mssp-run"
+
+    # Stale run acquired at epoch 100 and progressed a couple of stages.
+    store.acquire("run-lease", owner=owner, now=100, ttl=50)
+    store.refresh("run-lease", owner=owner, now=100, ttl=50, fencing_token=100)
+    store.refresh("run-lease", owner=owner, now=110, ttl=50, fencing_token=101)
+
+    # It hangs; the lease expires; a fresher run (epoch 500) takes over + stamps.
+    store.refresh("run-lease", owner=owner, now=500, ttl=50, fencing_token=500)
+
+    # The stale run wakes and tries to refresh for its next stage -- its token is
+    # still based on epoch 100, so it is fenced out.
+    with pytest.raises(LeaseUnavailable):
+        store.refresh("run-lease", owner=owner, now=520, ttl=50, fencing_token=102)
+
+
+# --- launch failure halts cleanly --------------------------------------------
+
+
+def test_launch_failure_halts_cleanly_and_skips_later_stages() -> None:
+    ecs = FakeEcsClient(
+        _identities("download", "raw", "dbt"),
+        launch_failures=("raw",),  # run-task rejects the second stage's launch
+    )
+    store = InMemoryLeaseStore()
+    plan = StagePlan(
+        stages=(
+            _stage(name="download", taskdef_family="download"),
+            _stage(name="raw", taskdef_family="raw"),
+            _stage(name="dbt", taskdef_family="dbt"),
+        )
+    )
+    seq = Sequencer(
+        ecs=ecs, lease=store, config=_config(), readiness_source=_ready, clock=Clock()
+    )
+    result = seq.run(plan)
+
+    # Clean halt (no traceback escapes), reported as the launch gate.
+    assert result.ok is False
+    assert [o.stage for o in result.outcomes] == ["download", "raw"]
+    assert result.outcomes[-1].gate == "launch"
+    assert "raw" in result.outcomes[-1].detail
+    assert "launch" in result.summary().lower()
+    # The first stage launched; the failing launch is not counted as launched;
+    # the third stage never launches.
+    assert ecs.run_order == ["download"]
+    # Lease released despite the failure.
+    assert store.get("run-lease") is None
+
+
+def test_launch_error_is_raised_by_the_boto_adapter_on_ecs_failures() -> None:
+    from mssp_pipeline.sequencer import BotoEcsClient
+
+    class StubBoto:
+        def run_task(self, **kwargs):
+            return {"tasks": [], "failures": [{"reason": "CapacityUnavailable"}]}
+
+    adapter = BotoEcsClient(client=StubBoto())
+    with pytest.raises(LaunchError):
+        adapter.run_task(cluster="c", task_definition=_arn("raw", 1))
 
 
 # --- CLI ---------------------------------------------------------------------
@@ -390,7 +563,7 @@ def test_cli_runs_a_provider_plan_and_exits_zero_on_success(monkeypatch) -> None
     def _make_job() -> SequencerJob:
         ecs = FakeEcsClient(_identities("download"))
         store = InMemoryLeaseStore()
-        plan = StagePlan(stages=(Stage(name="download", taskdef_family="download"),))
+        plan = StagePlan(stages=(_stage(name="download", taskdef_family="download"),))
         seq = Sequencer(
             ecs=ecs,
             lease=store,
@@ -417,7 +590,7 @@ def test_cli_exits_non_zero_when_the_sequence_halts(monkeypatch) -> None:
     def _make_job() -> SequencerJob:
         ecs = FakeEcsClient(_identities("raw"), exit_codes={"raw": 2})
         store = InMemoryLeaseStore()
-        plan = StagePlan(stages=(Stage(name="raw", taskdef_family="raw"),))
+        plan = StagePlan(stages=(_stage(name="raw", taskdef_family="raw"),))
         seq = Sequencer(
             ecs=ecs,
             lease=store,
