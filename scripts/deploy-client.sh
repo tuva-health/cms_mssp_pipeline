@@ -70,6 +70,20 @@ require_immutable_image() {
   fi
 }
 
+# The connector (dbt) image, like the pipeline image, must be pinned by digest
+# so a dbt task revision resolves to exactly one build. It is optional: a client
+# with no dbt stage never sets it (and no template references it). When set, it
+# must be an immutable repository@sha256 digest.
+validate_connector_image() {
+  local image="${CONNECTOR_IMAGE:-}"
+  [[ -z "$image" ]] && return 0
+  if [[ ! "$image" =~ ^[^@[:space:]]+@sha256:[0-9a-f]{64}$ ]]; then
+    echo "CONNECTOR_IMAGE must be an immutable repository@sha256 digest, got: $image" >&2
+    exit 1
+  fi
+  export CONNECTOR_IMAGE
+}
+
 resolve_secret_arn() {
   local secret_id="$1"
   aws secretsmanager describe-secret --secret-id "$secret_id" --query ARN --output text
@@ -88,6 +102,7 @@ recorded_taskdef_arn() {
 
 render_taskdefs() {
   require_immutable_image
+  validate_connector_image
   local out_dir="$CLIENT_DIR/rendered"
   mkdir -p "$out_dir"
 

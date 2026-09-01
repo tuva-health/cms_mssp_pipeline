@@ -68,11 +68,25 @@ def build_placeholder_map(env: Mapping[str, str]) -> dict[str, str]:
     mapping = {
         "<ACCOUNT_ID>": account_id,
         "<REGION>": env.get("REGION", ""),
+        # Resolved unconditionally: every template needs the pipeline image and
+        # deploy-client.sh's require_immutable_image guard hard-fails before
+        # render if it is unset. The connector image, needed only by dbt stages,
+        # is instead resolved conditionally below so it fails closed when a dbt
+        # template references it with no image set.
         "<PIPELINE_IMAGE_URI>": env.get("PIPELINE_IMAGE", ""),
         "<ACO_ID>": env.get("ACO_ID", "").strip(),
+        # Role ARNs are pure functions of account + project + a per-purpose
+        # suffix, so every stage's roles resolve without per-stage config. This
+        # is what lets a client overlay drop in per-stage taskdefs (download /
+        # raw-* / dbt-*) and have them rendered by the same loop.
         "<TASK_EXECUTION_ROLE_ARN>": _role_arn(account_id, project_name, "ecs-task-execution-role"),
         "<RUNTIME_TASK_ROLE_ARN>": _role_arn(account_id, project_name, "runtime-task-role"),
         "<BOOTSTRAP_TASK_ROLE_ARN>": _role_arn(account_id, project_name, "bootstrap-task-role"),
+        "<DOWNLOAD_EXECUTION_ROLE_ARN>": _role_arn(account_id, project_name, "download-execution-role"),
+        "<DOWNLOAD_TASK_ROLE_ARN>": _role_arn(account_id, project_name, "download-task-role"),
+        "<RAW_TASK_ROLE_ARN>": _role_arn(account_id, project_name, "raw-task-role"),
+        "<DBT_TASK_ROLE_ARN>": _role_arn(account_id, project_name, "dbt-task-role"),
+        "<SNOWFLAKE_EXECUTION_ROLE_ARN>": _role_arn(account_id, project_name, "snowflake-execution-role"),
         "<ACOMS_CONFIG_SECRET_ARN>": env.get("ACOMS_CONFIG_SECRET_ARN", ""),
         "<CMS_API_KEY_SECRET_ARN>": env.get("CMS_API_KEY_SECRET_ARN", ""),
         "<CMS_API_SECRET_SECRET_ARN>": env.get("CMS_API_SECRET_SECRET_ARN", ""),
@@ -84,6 +98,31 @@ def build_placeholder_map(env: Mapping[str, str]) -> dict[str, str]:
     if bucket:
         mapping["<FILE_STORE_URI>"] = _s3_uri(bucket, file_store_prefix)
         mapping["<OUTPUT_URI>"] = output_location_override or _s3_uri(bucket, output_prefix)
+
+    # Per-stage Snowflake placeholders (raw-* / dbt-* templates). Each is added
+    # only when supplied so a missing value fails the render closed -- an
+    # unresolved <PLACEHOLDER> -- rather than baking an empty/invalid taskdef,
+    # the same fail-closed rationale used for the S3 URIs above. Database and
+    # query tag are per-environment (DEV/PROD) so the dev and prod dbt/raw
+    # templates resolve to distinct values from one env, without a shared
+    # placeholder collapsing them.
+    per_stage = {
+        "<CONNECTOR_IMAGE_URI>": env.get("CONNECTOR_IMAGE", "").strip(),
+        "<SNOWFLAKE_USERNAME>": env.get("SNOWFLAKE_USERNAME", "").strip(),
+        "<SNOWFLAKE_ACCOUNT>": env.get("SNOWFLAKE_ACCOUNT", "").strip(),
+        "<SNOWFLAKE_SCHEMA>": env.get("SNOWFLAKE_SCHEMA", "").strip(),
+        "<SNOWFLAKE_COMPUTE_WAREHOUSE>": env.get("SNOWFLAKE_COMPUTE_WAREHOUSE", "").strip(),
+        "<SNOWFLAKE_ACCOUNT_ROLE>": env.get("SNOWFLAKE_ACCOUNT_ROLE", "").strip(),
+        "<SNOWFLAKE_DATABASE_DEV>": env.get("SNOWFLAKE_DATABASE_DEV", "").strip(),
+        "<SNOWFLAKE_DATABASE_PROD>": env.get("SNOWFLAKE_DATABASE_PROD", "").strip(),
+        "<SNOWFLAKE_QUERY_TAG_DEV>": env.get("SNOWFLAKE_QUERY_TAG_DEV", "").strip(),
+        "<SNOWFLAKE_QUERY_TAG_PROD>": env.get("SNOWFLAKE_QUERY_TAG_PROD", "").strip(),
+        "<SNOWFLAKE_RSA_KEY_SECRET_ARN>": env.get("SNOWFLAKE_RSA_KEY_SECRET_ARN", "").strip(),
+        "<SNOWFLAKE_RSA_KEY_PASSPHRASE_SECRET_ARN>": env.get(
+            "SNOWFLAKE_RSA_KEY_PASSPHRASE_SECRET_ARN", ""
+        ).strip(),
+    }
+    mapping.update({key: value for key, value in per_stage.items() if value})
     return mapping
 
 

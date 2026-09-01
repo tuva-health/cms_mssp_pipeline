@@ -319,6 +319,175 @@ def test_empty_template_dir_fails_closed(tmp_path):
         render_taskdefs.render_all(str(ecs), str(tmp_path / "rendered"), BASE_ENV)
 
 
+# ---- per-stage placeholder support (download / raw-* / dbt-*) ------------
+
+# Extends the Snowflake env with the per-stage placeholders a staged overlay
+# (download / raw-* / dbt-*) references. Synthetic, client-neutral values only.
+STAGED_ENV = {
+    **SNOWFLAKE_ENV,
+    "CONNECTOR_IMAGE": (
+        "111122223333.dkr.ecr.us-east-1.amazonaws.com/mssp-connector@sha256:"
+        + "2" * 64
+    ),
+    "SNOWFLAKE_DATABASE_DEV": "MSSP_DEV",
+    "SNOWFLAKE_DATABASE_PROD": "MSSP",
+    "SNOWFLAKE_QUERY_TAG_DEV": "svc-dbt-dev",
+    "SNOWFLAKE_QUERY_TAG_PROD": "svc-dbt-prod",
+}
+
+
+def test_per_stage_placeholders_resolve(tmp_path):
+    """The engine keeps its documented promise: a client overlay can drop in
+    per-stage taskdefs (download / raw-* / dbt-*) and have every per-stage
+    placeholder resolved by the same loop -- no code change per stage."""
+    ecs = tmp_path / "ecs"
+    ecs.mkdir()
+    out = tmp_path / "rendered"
+    _write(
+        ecs,
+        "taskdef-download.json",
+        {
+            "family": "svc-download",
+            "executionRoleArn": "<DOWNLOAD_EXECUTION_ROLE_ARN>",
+            "taskRoleArn": "<DOWNLOAD_TASK_ROLE_ARN>",
+            "containerDefinitions": [
+                {
+                    "name": "dl",
+                    "image": "<PIPELINE_IMAGE_URI>",
+                    "environment": [
+                        {"name": "MSSP_ACO_ID", "value": "<ACO_ID>"},
+                        {"name": "MSSP_FILE_STORE", "value": "<FILE_STORE_URI>"},
+                    ],
+                }
+            ],
+        },
+    )
+    _write(
+        ecs,
+        "taskdef-raw-dev.json",
+        {
+            "family": "svc-raw-dev",
+            "executionRoleArn": "<SNOWFLAKE_EXECUTION_ROLE_ARN>",
+            "taskRoleArn": "<RAW_TASK_ROLE_ARN>",
+            "containerDefinitions": [
+                {
+                    "name": "raw",
+                    "image": "<PIPELINE_IMAGE_URI>",
+                    "environment": [
+                        {"name": "SNOWFLAKE_USERNAME", "value": "<SNOWFLAKE_USERNAME>"},
+                        {"name": "SNOWFLAKE_ACCOUNT", "value": "<SNOWFLAKE_ACCOUNT>"},
+                        {"name": "SNOWFLAKE_DATABASE", "value": "<SNOWFLAKE_DATABASE_DEV>"},
+                        {"name": "SNOWFLAKE_SCHEMA", "value": "<SNOWFLAKE_SCHEMA>"},
+                        {"name": "SNOWFLAKE_COMPUTE_WAREHOUSE", "value": "<SNOWFLAKE_COMPUTE_WAREHOUSE>"},
+                        {"name": "SNOWFLAKE_ACCOUNT_ROLE", "value": "<SNOWFLAKE_ACCOUNT_ROLE>"},
+                    ],
+                    "secrets": [
+                        {"name": "SNOWFLAKE_RSA_KEY", "valueFrom": "<SNOWFLAKE_RSA_KEY_SECRET_ARN>"},
+                        {"name": "SNOWFLAKE_RSA_KEY_PASSPHRASE", "valueFrom": "<SNOWFLAKE_RSA_KEY_PASSPHRASE_SECRET_ARN>"},
+                    ],
+                }
+            ],
+        },
+    )
+    _write(
+        ecs,
+        "taskdef-dbt-dev.json",
+        {
+            "family": "svc-dbt-dev",
+            "executionRoleArn": "<SNOWFLAKE_EXECUTION_ROLE_ARN>",
+            "taskRoleArn": "<DBT_TASK_ROLE_ARN>",
+            "containerDefinitions": [
+                {
+                    "name": "dbt",
+                    "image": "<CONNECTOR_IMAGE_URI>",
+                    "environment": [
+                        {"name": "SNOWFLAKE_ACCOUNT", "value": "<SNOWFLAKE_ACCOUNT>"},
+                        {"name": "SNOWFLAKE_QUERY_TAG", "value": "<SNOWFLAKE_QUERY_TAG_DEV>"},
+                    ],
+                    "command": ["sh", "-lc", "run --database <SNOWFLAKE_DATABASE_DEV>"],
+                }
+            ],
+        },
+    )
+
+    render_taskdefs.render_all(str(ecs), str(out), STAGED_ENV)
+
+    # No unresolved placeholder survived in any rendered output.
+    import re as _re
+    for name in ("taskdef-download.json", "taskdef-raw-dev.json", "taskdef-dbt-dev.json"):
+        assert not _re.findall(r"<[^>]+>", (out / name).read_text(encoding="utf-8"))
+
+    dl = json.loads((out / "taskdef-download.json").read_text(encoding="utf-8"))
+    assert dl["executionRoleArn"].endswith(":role/mssp-pipeline-download-execution-role")
+    assert dl["taskRoleArn"].endswith(":role/mssp-pipeline-download-task-role")
+
+    raw = json.loads((out / "taskdef-raw-dev.json").read_text(encoding="utf-8"))
+    assert raw["executionRoleArn"].endswith(":role/mssp-pipeline-snowflake-execution-role")
+    assert raw["taskRoleArn"].endswith(":role/mssp-pipeline-raw-task-role")
+    renv = {e["name"]: e["value"] for e in raw["containerDefinitions"][0]["environment"]}
+    assert renv["SNOWFLAKE_USERNAME"] == "svc_mssp"
+    assert renv["SNOWFLAKE_DATABASE"] == "MSSP_DEV"  # dev DB, not prod
+    assert renv["SNOWFLAKE_COMPUTE_WAREHOUSE"] == "COMPUTE_WH"
+    rsec = {s["name"]: s["valueFrom"] for s in raw["containerDefinitions"][0]["secrets"]}
+    assert rsec["SNOWFLAKE_RSA_KEY"].endswith("rsa-key-DDDDDD")
+
+    dbt = json.loads((out / "taskdef-dbt-dev.json").read_text(encoding="utf-8"))
+    assert dbt["taskRoleArn"].endswith(":role/mssp-pipeline-dbt-task-role")
+    assert dbt["containerDefinitions"][0]["image"].endswith("mssp-connector@sha256:" + "2" * 64)
+    denv = {e["name"]: e["value"] for e in dbt["containerDefinitions"][0]["environment"]}
+    assert denv["SNOWFLAKE_QUERY_TAG"] == "svc-dbt-dev"  # dev tag, distinct from prod
+    assert "--database MSSP_DEV" in " ".join(dbt["containerDefinitions"][0]["command"])
+
+
+def test_query_tag_dev_and_prod_resolve_distinctly(tmp_path):
+    """dev and prod dbt templates must resolve to distinct query tags from the
+    same env (the shared-placeholder collision the old renderer avoided)."""
+    ecs = tmp_path / "ecs"
+    ecs.mkdir()
+    out = tmp_path / "rendered"
+    _write(ecs, "taskdef-dbt-dev.json", {"family": "d", "tag": "<SNOWFLAKE_QUERY_TAG_DEV>", "db": "<SNOWFLAKE_DATABASE_DEV>"})
+    _write(ecs, "taskdef-dbt-prod.json", {"family": "p", "tag": "<SNOWFLAKE_QUERY_TAG_PROD>", "db": "<SNOWFLAKE_DATABASE_PROD>"})
+
+    render_taskdefs.render_all(str(ecs), str(out), STAGED_ENV)
+
+    dev = json.loads((out / "taskdef-dbt-dev.json").read_text(encoding="utf-8"))
+    prod = json.loads((out / "taskdef-dbt-prod.json").read_text(encoding="utf-8"))
+    assert (dev["tag"], dev["db"]) == ("svc-dbt-dev", "MSSP_DEV")
+    assert (prod["tag"], prod["db"]) == ("svc-dbt-prod", "MSSP")
+
+
+def test_missing_per_stage_snowflake_value_fails_closed(tmp_path):
+    """A per-stage Snowflake placeholder absent from the env fails the render
+    closed (unresolved <PLACEHOLDER>) rather than baking an empty value."""
+    ecs = tmp_path / "ecs"
+    ecs.mkdir()
+    out = tmp_path / "rendered"
+    _write(ecs, "taskdef-raw-dev.json", {"family": "r", "u": "<SNOWFLAKE_USERNAME>"})
+
+    # BASE_ENV carries no Snowflake values -> must fail closed, not render "".
+    with pytest.raises(SystemExit) as exc:
+        render_taskdefs.render_all(str(ecs), str(out), BASE_ENV)
+    assert "<SNOWFLAKE_USERNAME>" in str(exc.value)
+
+
+def test_missing_connector_image_fails_closed(tmp_path):
+    """A dbt template referencing <CONNECTOR_IMAGE_URI> with no CONNECTOR_IMAGE
+    set fails the render closed -- the exact reason the connector image is
+    resolved conditionally rather than defaulting to an empty string."""
+    ecs = tmp_path / "ecs"
+    ecs.mkdir()
+    out = tmp_path / "rendered"
+    _write(
+        ecs,
+        "taskdef-dbt-dev.json",
+        {"family": "d", "containerDefinitions": [{"name": "dbt", "image": "<CONNECTOR_IMAGE_URI>"}]},
+    )
+    env = {k: v for k, v in STAGED_ENV.items() if k != "CONNECTOR_IMAGE"}
+    with pytest.raises(SystemExit) as exc:
+        render_taskdefs.render_all(str(ecs), str(out), env)
+    assert "<CONNECTOR_IMAGE_URI>" in str(exc.value)
+
+
 # ---- register seam -------------------------------------------------------
 
 _FAKE_AWS = """#!/usr/bin/env python3
