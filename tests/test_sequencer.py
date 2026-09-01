@@ -664,3 +664,41 @@ def test_boto_adapter_shapes_requests_against_a_stub_client() -> None:
 
     result = adapter.wait_for_stopped(cluster="c", task_arn=task_arn)
     assert result.exit_code == 0
+    # The waiter is polled on a generous budget, not boto's 10-min default, so a
+    # long-running stage (download / raw / dbt) is not cut off while still live.
+    assert stub.waiter.waited[0]["WaiterConfig"] == {"Delay": 15, "MaxAttempts": 480}
+
+
+def test_wait_timeout_is_configurable(monkeypatch) -> None:
+    from mssp_pipeline.sequencer import BotoEcsClient
+
+    class StubWaiter:
+        def __init__(self) -> None:
+            self.waited: list[dict] = []
+
+        def wait(self, **kwargs) -> None:
+            self.waited.append(kwargs)
+
+    class StubBoto:
+        def __init__(self) -> None:
+            self.waiter = StubWaiter()
+
+        def get_waiter(self, name):
+            return self.waiter
+
+        def describe_tasks(self, cluster, tasks):
+            return {"tasks": [{"containers": [{"exitCode": 0}], "stoppedReason": None}]}
+
+    # Explicit constructor values win.
+    stub = StubBoto()
+    BotoEcsClient(client=stub, wait_delay_seconds=30, wait_max_attempts=200).wait_for_stopped(
+        cluster="c", task_arn="a"
+    )
+    assert stub.waiter.waited[0]["WaiterConfig"] == {"Delay": 30, "MaxAttempts": 200}
+
+    # Otherwise the env contract tunes it.
+    monkeypatch.setenv("MSSP_TASK_WAIT_DELAY_SECONDS", "20")
+    monkeypatch.setenv("MSSP_TASK_WAIT_MAX_ATTEMPTS", "360")
+    stub2 = StubBoto()
+    BotoEcsClient(client=stub2).wait_for_stopped(cluster="c", task_arn="a")
+    assert stub2.waiter.waited[0]["WaiterConfig"] == {"Delay": 20, "MaxAttempts": 360}

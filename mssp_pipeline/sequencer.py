@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import os
 import sys
 import time
 from dataclasses import dataclass, field
@@ -418,6 +419,8 @@ class BotoEcsClient:
         region: str | None = None,
         launch_type: str = "FARGATE",
         network_configuration: dict | None = None,
+        wait_delay_seconds: int | None = None,
+        wait_max_attempts: int | None = None,
     ) -> None:
         if client is None:  # pragma: no cover - exercised only against real AWS
             import boto3
@@ -426,6 +429,21 @@ class BotoEcsClient:
         self._ecs = client
         self._launch_type = launch_type
         self._network_configuration = network_configuration
+        # A pipeline stage (download / raw / dbt) routinely runs far longer than
+        # boto's default tasks_stopped waiter (100 x 6s = 10 min), which would
+        # raise WaiterError while the task is still legitimately running. Poll on
+        # a generous, env-tunable budget instead; the lease TTL is the outer
+        # bound. Defaults: 15s x 480 = 2h per stage.
+        self._wait_delay_seconds = (
+            wait_delay_seconds
+            if wait_delay_seconds is not None
+            else int(os.environ.get("MSSP_TASK_WAIT_DELAY_SECONDS", "15"))
+        )
+        self._wait_max_attempts = (
+            wait_max_attempts
+            if wait_max_attempts is not None
+            else int(os.environ.get("MSSP_TASK_WAIT_MAX_ATTEMPTS", "480"))
+        )
 
     def describe_task_definition(self, family: str) -> TaskIdentity:
         resp = self._ecs.describe_task_definition(taskDefinition=family)
@@ -455,7 +473,14 @@ class BotoEcsClient:
 
     def wait_for_stopped(self, *, cluster: str, task_arn: str) -> TaskResult:
         waiter = self._ecs.get_waiter("tasks_stopped")
-        waiter.wait(cluster=cluster, tasks=[task_arn])
+        waiter.wait(
+            cluster=cluster,
+            tasks=[task_arn],
+            WaiterConfig={
+                "Delay": self._wait_delay_seconds,
+                "MaxAttempts": self._wait_max_attempts,
+            },
+        )
         desc = self._ecs.describe_tasks(cluster=cluster, tasks=[task_arn])
         task = desc["tasks"][0]
         containers = task.get("containers") or [{}]
