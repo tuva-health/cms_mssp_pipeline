@@ -82,8 +82,11 @@ def test_cms_binary_checksums_match_the_committed_binaries() -> None:
             continue
         recorded, relative = line.split(maxsplit=1)
         entries[relative.strip()] = recorded
-    # Recorded files are exactly the two CMS CLI builds.
-    assert set(entries) == {"bin/acoms-cli", "bin/acoms-cli-linux"}
+    # Only the shipped Linux CLI is recorded. The macOS build is a local-dev
+    # convenience, excluded from the image via .dockerignore and not verified at
+    # release time (verifying it would fail the in-container check, since it is
+    # deliberately absent from the build context).
+    assert set(entries) == {"bin/acoms-cli-linux"}
     for relative, recorded in entries.items():
         assert re.fullmatch(r"[0-9a-f]{64}", recorded)
         actual = hashlib.sha256((ROOT / relative).read_bytes()).hexdigest()
