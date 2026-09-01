@@ -113,6 +113,6 @@ DuckDB reads files directly (zipfs, webbed, rusty_sheet, excel extensions) — n
 - **DuckDB temp spill**: ECS runtime uses local scratch (`MSSP_TEMP_LOCATION`, usually `/tmp/mssp-staging`) and DuckDB `temp_directory` points there for spill-to-disk.
 - **Snowflake ECS secret handling**: runtime accepts `SNOWFLAKE_RSA_KEY` as raw PEM or base64-encoded PEM; entrypoint materializes `/tmp/snowflake_rsa_key.p8` and exports `SNOWFLAKE_RSA_KEY_PATH`.
 - **Foundation gate parameters**: Terraform creates `/mssp/bootstrap_complete` and `/mssp/whitelist_confirmed` with initial `false`, but now ignores later value changes so bootstrap/ops can flip them to `true` without later foundation applies resetting them.
-- **uv.lock gitignored** — do not commit lockfile.
+- **uv.lock is committed on purpose** — the image builds `uv sync --frozen` from it, so a clean checkout reproduces the same dependency set. When dependencies change, regenerate it (`uv lock`) and commit the updated lockfile alongside `pyproject.toml`; never revert or drop it.
 - Terraform `.terraform/`, `terraform.tfstate*`, and crash logs should stay untracked.
 - `config.txt`, `state.json`, `downloads/`, `STAGED/`, `.runs/` gitignored.
