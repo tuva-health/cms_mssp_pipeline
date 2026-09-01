@@ -9,11 +9,24 @@ any client identity in the upstream tree.
 from __future__ import annotations
 
 import re
+import subprocess
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 TF = ROOT / "infra" / "terraform" / "aws"
 EXAMPLE = ROOT / "infra" / "clients" / "client.example"
+
+# Committed subtrees whose contents must stay client-neutral. The guard
+# enumerates the git-tracked files under these (not the raw filesystem), so
+# untracked cruft (stale ``__pycache__/*.pyc``, build outputs, a stray
+# ``release-metadata/``) can't spuriously fail the genericity proof (TUVA-42).
+SCANNED_SUBTREES = (
+    "infra/terraform/aws",
+    "infra/clients/client.example",
+    "scripts",
+    "infra/aws",
+)
 
 # Identity fragments that must never appear in the canonical (upstream) tree.
 FORBIDDEN = [
@@ -92,14 +105,66 @@ def test_client_example_has_bootstrap_scaffolding() -> None:
     assert "deployer_principal_arns" in tfvars
 
 
-def test_no_client_identity_in_the_upstream_substrate() -> None:
+def git_tracked_files(root: Path, subtrees: Sequence[str]) -> list[Path]:
+    """Absolute paths of the git-tracked files under ``subtrees``.
+
+    Uses ``git ls-files`` so only committed/staged files are scanned -- never
+    untracked artifacts that happen to sit in the working tree.
+    """
+    result = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z", "--", *subtrees],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return [root / rel for rel in result.stdout.split("\0") if rel]
+
+
+def scan_for_client_identity(files: Iterable[Path], root: Path = ROOT) -> list[str]:
+    """Return ``path: token`` offenders for any FORBIDDEN literal in ``files``."""
     offenders: list[str] = []
-    for base in (TF, EXAMPLE, ROOT / "scripts", ROOT / "infra" / "aws"):
-        for path in base.rglob("*"):
-            if not path.is_file() or ".terraform" in path.parts:
-                continue
-            text = path.read_text(encoding="utf-8", errors="ignore")
-            for token in FORBIDDEN:
-                if token.lower() in text.lower():
-                    offenders.append(f"{path.relative_to(ROOT)}: {token}")
+    for path in files:
+        if ".terraform" in path.parts or not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for token in FORBIDDEN:
+            if token.lower() in text.lower():
+                offenders.append(f"{path.relative_to(root)}: {token}")
+    return offenders
+
+
+def test_no_client_identity_in_the_upstream_substrate() -> None:
+    tracked = git_tracked_files(ROOT, SCANNED_SUBTREES)
+    offenders = scan_for_client_identity(tracked)
     assert not offenders, "client identity leaked upstream: " + "; ".join(offenders)
+
+
+def test_guard_scans_tracked_files_not_untracked_cruft(tmp_path) -> None:
+    """A forbidden token in a TRACKED file is caught; the same token in an
+    UNTRACKED file (stale ``.pyc``, build output, ``release-metadata/``) is
+    ignored -- so untracked cruft can't spuriously fail the guard (TUVA-42).
+    """
+    subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True)
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+
+    # A tracked file carrying a client literal -> must be flagged.
+    tracked_leak = scripts / "leak.tf"
+    tracked_leak.write_text('name = "vbca-data-bucket"\n', encoding="utf-8")
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "add", "scripts/leak.tf"], check=True
+    )
+
+    # Stray UNTRACKED artifacts with forbidden literals -> must be ignored.
+    (scripts / "stale.pyc").write_text("evydekl A5495", encoding="utf-8")
+    release_meta = tmp_path / "release-metadata"
+    release_meta.mkdir()
+    (release_meta / "manifest.json").write_text('{"aco": "A5495"}', encoding="utf-8")
+
+    tracked = git_tracked_files(tmp_path, ("scripts", "release-metadata"))
+    offenders = scan_for_client_identity(tracked, root=tmp_path)
+
+    # The tracked leak is caught; nothing untracked is.
+    assert any("leak.tf" in o for o in offenders), offenders
+    assert not any("stale.pyc" in o for o in offenders), offenders
+    assert not any("release-metadata" in o for o in offenders), offenders

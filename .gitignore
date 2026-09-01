@@ -12,6 +12,9 @@ STAGED/
 # Pipeline run manifests
 .runs/
 
+# Per-release metadata emitted into the working tree (not committed)
+release-metadata/
+
 # Python
 __pycache__/
 *.py[cod]
