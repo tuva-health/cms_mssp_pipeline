@@ -16,6 +16,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shutil
 import stat
 from pathlib import Path
 
@@ -81,12 +82,38 @@ SNOWFLAKE_ENV = {
 }
 
 
+# The canonical templates these byte-identical assertions are about. A client
+# fork adds staged taskdefs (download / raw-* / dbt-*) to the real ``ECS`` dir;
+# those extra templates fail closed on connector/Snowflake placeholders that a
+# bare test env doesn't supply. Copying only the named templates into an
+# isolated dir keeps these tests asserting *engine behavior on these templates*
+# rather than the canonical dir's exact template count (TUVA-48).
+CANONICAL_TASKDEFS = ("taskdef-bootstrap.json", "taskdef-runtime.json")
+
+
+def _canonical_ecs(tmp_path: Path) -> Path:
+    """Copy only the canonical taskdef templates into an isolated ECS dir."""
+    ecs = tmp_path / "ecs"
+    ecs.mkdir()
+    for name in CANONICAL_TASKDEFS:
+        shutil.copyfile(ECS / name, ecs / name)
+    return ecs
+
+
+def _write(dir_: Path, name: str, doc: dict) -> Path:
+    path = dir_ / name
+    path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
 def test_runtime_and_bootstrap_render_byte_identical_parquet(tmp_path):
     """The two canonical templates render byte-for-byte as before (PARQUET)."""
-    render_taskdefs.render_all(str(ECS), str(tmp_path), {**BASE_ENV, "MSSP_OUTPUT_TYPE": "PARQUET"})
+    ecs = _canonical_ecs(tmp_path)
+    out = tmp_path / "rendered"
+    render_taskdefs.render_all(str(ecs), str(out), {**BASE_ENV, "MSSP_OUTPUT_TYPE": "PARQUET"})
 
-    runtime = (tmp_path / "taskdef-runtime.json").read_text(encoding="utf-8")
-    bootstrap = (tmp_path / "taskdef-bootstrap.json").read_text(encoding="utf-8")
+    runtime = (out / "taskdef-runtime.json").read_text(encoding="utf-8")
+    bootstrap = (out / "taskdef-bootstrap.json").read_text(encoding="utf-8")
 
     assert runtime == (EXPECTED / "taskdef-runtime.parquet.json").read_text(encoding="utf-8")
     assert bootstrap == (EXPECTED / "taskdef-bootstrap.json").read_text(encoding="utf-8")
@@ -94,22 +121,71 @@ def test_runtime_and_bootstrap_render_byte_identical_parquet(tmp_path):
 
 def test_runtime_renders_byte_identical_snowflake(tmp_path):
     """The Snowflake augmentation (env + injected secrets) is preserved exactly."""
-    render_taskdefs.render_all(str(ECS), str(tmp_path), SNOWFLAKE_ENV)
+    ecs = _canonical_ecs(tmp_path)
+    out = tmp_path / "rendered"
+    render_taskdefs.render_all(str(ecs), str(out), SNOWFLAKE_ENV)
 
-    runtime = (tmp_path / "taskdef-runtime.json").read_text(encoding="utf-8")
+    runtime = (out / "taskdef-runtime.json").read_text(encoding="utf-8")
     assert runtime == (EXPECTED / "taskdef-runtime.snowflake.json").read_text(encoding="utf-8")
 
 
 def test_marker_is_stripped_from_rendered_output(tmp_path):
-    render_taskdefs.render_all(str(ECS), str(tmp_path), {**BASE_ENV, "MSSP_OUTPUT_TYPE": "PARQUET"})
-    runtime = (tmp_path / "taskdef-runtime.json").read_text(encoding="utf-8")
+    ecs = _canonical_ecs(tmp_path)
+    out = tmp_path / "rendered"
+    render_taskdefs.render_all(str(ecs), str(out), {**BASE_ENV, "MSSP_OUTPUT_TYPE": "PARQUET"})
+    runtime = (out / "taskdef-runtime.json").read_text(encoding="utf-8")
     assert "x-mssp-render" not in runtime
 
 
-def _write(dir_: Path, name: str, doc: dict) -> Path:
-    path = dir_ / name
-    path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
-    return path
+def test_byte_identical_assertions_survive_extra_overlay_template(tmp_path):
+    """Adding an overlay's staged taskdef must not perturb the canonical render.
+
+    A deploying fork drops extra ``taskdef-*.json`` (with their own
+    placeholders + marker) into the ECS dir. As long as the render env is
+    complete for everything discovered, the engine renders them all: the
+    canonical two stay byte-identical to their goldens and the extra template
+    renders too. This proves the tests assert engine behavior, not the exact
+    template count in the canonical dir (TUVA-48).
+    """
+    ecs = _canonical_ecs(tmp_path)
+    out = tmp_path / "rendered"
+    # A stage-like overlay taskdef with its own placeholders + augment marker,
+    # the shape a client fork adds (download / raw-* / dbt-*).
+    _write(
+        ecs,
+        "taskdef-stage.json",
+        {
+            "x-mssp-render": {"augment": "output-backend"},
+            "family": "mssp-pipeline-stage",
+            "containerDefinitions": [
+                {
+                    "name": "worker",
+                    "image": "<PIPELINE_IMAGE_URI>",
+                    "environment": [{"name": "AWS_REGION", "value": "<REGION>"}],
+                }
+            ],
+        },
+    )
+
+    # A complete env for everything discovered -> the engine renders all and
+    # fails closed on none.
+    render_taskdefs.render_all(str(ecs), str(out), SNOWFLAKE_ENV)
+
+    # The canonical outputs are unchanged by the presence of the extra template.
+    assert (out / "taskdef-runtime.json").read_text(encoding="utf-8") == (
+        EXPECTED / "taskdef-runtime.snowflake.json"
+    ).read_text(encoding="utf-8")
+    assert (out / "taskdef-bootstrap.json").read_text(encoding="utf-8") == (
+        EXPECTED / "taskdef-bootstrap.json"
+    ).read_text(encoding="utf-8")
+
+    # The extra stage template rendered too: augmentation applied, marker and
+    # placeholders gone.
+    stage = json.loads((out / "taskdef-stage.json").read_text(encoding="utf-8"))
+    assert "x-mssp-render" not in stage
+    env = {e["name"]: e["value"] for e in stage["containerDefinitions"][0]["environment"]}
+    assert env["MSSP_OUTPUT_TYPE"] == "SNOWFLAKE"
+    assert env["AWS_REGION"] == "us-east-1"  # placeholder substituted
 
 
 def test_discovers_every_template_not_hardcoded_pair(tmp_path):
