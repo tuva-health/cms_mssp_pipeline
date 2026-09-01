@@ -483,13 +483,24 @@ class BotoEcsClient:
         )
         desc = self._ecs.describe_tasks(cluster=cluster, tasks=[task_arn])
         task = desc["tasks"][0]
-        containers = task.get("containers") or [{}]
-        exit_code = containers[0].get("exitCode")
+        containers = task.get("containers") or []
+        # The stage succeeds only if EVERY container exited 0. Reading a single
+        # container's code (e.g. containers[0]) is unsafe: the ECS response order
+        # is not guaranteed, so a failed workload can be masked by a sibling
+        # gate container that exited 0. A missing exit code (container killed or
+        # never started -- e.g. a readiness gate that blocked the workload) is a
+        # failure, not a silent success. Report the first non-zero code so the
+        # halt message is meaningful. (The mssp taskdefs' non-essential gate
+        # container runs to completion before the workload, so "all zero" is the
+        # correct success condition -- no long-lived sidecar is force-killed.)
+        codes = [c.get("exitCode") for c in containers]
+        if not codes or any(code is None for code in codes):
+            exit_code = 1
+        else:
+            exit_code = next((code for code in codes if code != 0), 0)
         return TaskResult(
             task_arn=task_arn,
-            # A task that stops without an exit code (killed, failed to start)
-            # is a failure, not a silent success.
-            exit_code=exit_code if exit_code is not None else 1,
+            exit_code=exit_code,
             stopped_reason=task.get("stoppedReason"),
         )
 

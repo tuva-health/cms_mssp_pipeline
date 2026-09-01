@@ -702,3 +702,42 @@ def test_wait_timeout_is_configurable(monkeypatch) -> None:
     stub2 = StubBoto()
     BotoEcsClient(client=stub2).wait_for_stopped(cluster="c", task_arn="a")
     assert stub2.waiter.waited[0]["WaiterConfig"] == {"Delay": 20, "MaxAttempts": 360}
+
+
+def test_wait_for_stopped_is_not_masked_by_a_passing_sibling_container() -> None:
+    """A failed workload must surface regardless of container order in the ECS
+    response; a sibling gate container that exited 0 must not mask it."""
+    from mssp_pipeline.sequencer import BotoEcsClient
+
+    def _boto(containers):
+        class StubWaiter:
+            def wait(self, **kwargs) -> None:
+                return None
+
+        class StubBoto:
+            def __init__(self) -> None:
+                self.waiter = StubWaiter()
+
+            def get_waiter(self, name):
+                return self.waiter
+
+            def describe_tasks(self, cluster, tasks):
+                return {"tasks": [{"containers": containers, "stoppedReason": "r"}]}
+
+        return BotoEcsClient(client=StubBoto())
+
+    gate_ok_workload_fail = [
+        {"name": "readiness-gates", "exitCode": 0},
+        {"name": "workload", "exitCode": 127},
+    ]
+    # Both orderings must report the failure.
+    assert _boto(gate_ok_workload_fail).wait_for_stopped(cluster="c", task_arn="a").exit_code == 127
+    assert _boto(list(reversed(gate_ok_workload_fail))).wait_for_stopped(cluster="c", task_arn="a").exit_code == 127
+    # A missing exit code (killed / never started) is a failure.
+    assert _boto(
+        [{"name": "readiness-gates", "exitCode": 0}, {"name": "workload", "exitCode": None}]
+    ).wait_for_stopped(cluster="c", task_arn="a").exit_code == 1
+    # Every container exited 0 -> success.
+    assert _boto(
+        [{"name": "readiness-gates", "exitCode": 0}, {"name": "workload", "exitCode": 0}]
+    ).wait_for_stopped(cluster="c", task_arn="a").exit_code == 0
