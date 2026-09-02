@@ -165,10 +165,26 @@ class SnowflakeExporter:
                 """)
 
                 full_table_name = self._table_ref(table_name)
+                # Create the columns UPPERCASE. DuckDB folds the (uppercase)
+                # fixed-width column definitions to lowercase in the staged
+                # Parquet, and a bare INFER_SCHEMA(OBJECT_CONSTRUCT(*)) would
+                # create case-sensitive lowercase-quoted columns ("cur_clm_uniq_id").
+                # The connector's dbt models reference the columns unquoted, which
+                # Snowflake folds to UPPERCASE, so lowercase-quoted columns raise
+                # "invalid identifier". Uppercasing the inferred COLUMN_NAME keeps
+                # the schema aligned with the authoritative definitions (and the
+                # models); the CASE_INSENSITIVE COPY below still loads the
+                # lowercase Parquet into the uppercase columns.
                 cursor.execute(f"""
                     CREATE OR REPLACE TABLE {full_table_name}
                     USING TEMPLATE (
-                        SELECT ARRAY_AGG(OBJECT_CONSTRUCT(*))
+                        SELECT ARRAY_AGG(
+                            OBJECT_CONSTRUCT(
+                                'COLUMN_NAME', UPPER("COLUMN_NAME"),
+                                'TYPE', "TYPE",
+                                'NULLABLE', "NULLABLE"
+                            )
+                        ) WITHIN GROUP (ORDER BY "ORDER_ID")
                         FROM TABLE(
                             INFER_SCHEMA(
                                 LOCATION=> '@{stage_name}',

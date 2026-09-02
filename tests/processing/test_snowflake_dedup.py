@@ -94,3 +94,31 @@ def test_get_missing_file_paths_supports_uppercase_file_path_columns():
     executed_sql = fake_cursor.execute.call_args.args[0]
     assert 'SELECT c."FILE_PATH"' in executed_sql
     assert 't."FILE_PATH" = c."FILE_PATH"' in executed_sql
+
+
+def test_full_refresh_creates_uppercase_columns():
+    """A recreated table must have UPPERCASE columns.
+
+    DuckDB folds the uppercase fixed-width column names to lowercase in the
+    staged Parquet; a bare INFER_SCHEMA would then create case-sensitive
+    lowercase-quoted columns, which the connector's unquoted (UPPERCASE-folded)
+    dbt references cannot resolve. The CREATE must uppercase the inferred column
+    names, and the load must still match the lowercase Parquet case-insensitively.
+    """
+    exporter = _make_exporter()
+    fake_cursor = MagicMock()
+    fake_conn = MagicMock()
+    fake_conn.cursor.return_value = fake_cursor
+
+    with patch.object(exporter, "_load_rsa_key", return_value=b"key"), \
+         patch("mssp_pipeline.processing.exporters.snowflake_exporter.connector.connect", return_value=fake_conn):
+        exporter._upload_to_snowflake("/tmp/parta_claims_header.parquet", "parta_claims_header")
+
+    sqls = [c.args[0] for c in fake_cursor.execute.call_args_list]
+    create_sql = next(s for s in sqls if "CREATE OR REPLACE TABLE" in s)
+    assert 'UPPER("COLUMN_NAME")' in create_sql
+    # OBJECT_CONSTRUCT(*) would carry the lowercase names verbatim -- it must not
+    # be used for the column template any more.
+    assert "OBJECT_CONSTRUCT(*)" not in create_sql
+    copy_sql = next(s for s in sqls if "COPY INTO" in s)
+    assert "MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE" in copy_sql
