@@ -2,8 +2,8 @@ import os
 from contextlib import closing
 
 from snowflake import connector
-from cryptography.hazmat.primitives import serialization
 
+from ..snowflake_session import load_private_key, snowflake_connection
 from .base import normalize_identifier, normalize_query, qualified_identifier, string_literal
 
 
@@ -213,15 +213,7 @@ class SnowflakeExporter:
                 raise
 
     def _connect(self):
-        return connector.connect(
-            user=self.sf_config.username,
-            account=self.sf_config.account,
-            schema=self.sf_config.schema,
-            database=self.sf_config.database,
-            warehouse=self.sf_config.warehouse,
-            private_key=self._load_rsa_key(),
-            role=self.sf_config.role,
-        )
+        return snowflake_connection(self.sf_config, private_key=self._load_rsa_key())
 
     def _table_ref(self, table_name: str) -> str:
         return qualified_identifier(
@@ -268,23 +260,7 @@ class SnowflakeExporter:
         return normalize_identifier(f"temp_format_{table_name}").upper()
 
     def _load_rsa_key(self):
-        if self._private_key is not None:
-            return self._private_key
-        key_path = self.sf_config.rsa_key_path
-        with open(key_path, "rb") as f:
-            key_data = f.read()
-        try:
-            self._private_key = serialization.load_pem_private_key(key_data, password=None)
-        except TypeError as e:
-            if "password" in str(e).lower():
-                passphrase = self.sf_config.rsa_key_passphrase or self._keyring_passphrase()
-                self._private_key = serialization.load_pem_private_key(
-                    key_data, password=passphrase.rstrip().encode()
-                )
-            else:
-                raise
+        if self._private_key is None:
+            self._private_key = load_private_key(self.sf_config)
         return self._private_key
 
-    def _keyring_passphrase(self) -> str:
-        import keyring
-        return keyring.get_password("SNOWFLAKE", self.sf_config.username)
