@@ -2,15 +2,19 @@
 # definitions) reads the named gate parameters to decide whether a stage may
 # run; the task role is granted exactly that read and nothing more.
 
+locals {
+  readiness_gate_parameter_arns = [
+    aws_ssm_parameter.bootstrap_complete.arn,
+    aws_ssm_parameter.whitelist_confirmed.arn,
+  ]
+}
+
 data "aws_iam_policy_document" "stage_readiness" {
   statement {
-    sid     = "ReadReadinessGates"
-    effect  = "Allow"
-    actions = ["ssm:GetParameter"]
-    resources = [
-      aws_ssm_parameter.bootstrap_complete.arn,
-      aws_ssm_parameter.whitelist_confirmed.arn,
-    ]
+    sid       = "ReadReadinessGates"
+    effect    = "Allow"
+    actions   = ["ssm:GetParameter"]
+    resources = local.readiness_gate_parameter_arns
   }
 }
 
@@ -29,13 +33,10 @@ resource "aws_iam_role_policy" "runtime_stage_readiness" {
 
 data "aws_iam_policy_document" "stage_readiness_injection" {
   statement {
-    sid     = "InjectReadinessGates"
-    effect  = "Allow"
-    actions = ["ssm:GetParameters"]
-    resources = [
-      aws_ssm_parameter.bootstrap_complete.arn,
-      aws_ssm_parameter.whitelist_confirmed.arn,
-    ]
+    sid       = "InjectReadinessGates"
+    effect    = "Allow"
+    actions   = ["ssm:GetParameters"]
+    resources = local.readiness_gate_parameter_arns
   }
 }
 

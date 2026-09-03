@@ -80,8 +80,8 @@ readiness instead of checking it). They are ECS container **secrets** whose
 
 ECS resolves the parameters with the task **execution** role at task start, so
 that role needs `ssm:GetParameters` on exactly those two parameters (see
-section 3). The parameter names are the foundation defaults; a client overlay
-may override one with `READINESS_<GATE>_PARAM=/custom/name` in its `env.sh`.
+section 3). The parameter names are fixed by the foundation; the ARNs are
+derived from the deploy `REGION` + `ACCOUNT_ID`, so no overlay value is needed.
 
 ---
 

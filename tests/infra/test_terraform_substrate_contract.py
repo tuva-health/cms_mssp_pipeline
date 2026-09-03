@@ -94,10 +94,14 @@ def test_execution_roles_get_least_privilege_readiness_injection() -> None:
     no literal role name)."""
     stage_iam = read(TF / "foundation" / "stage_iam.tf")
     assert '"ssm:GetParameters"' in stage_iam
+    # Both readiness policies share one two-ARN list (no wildcard, nothing else).
+    arns_start = stage_iam.index("readiness_gate_parameter_arns = [")
+    arns = stage_iam[arns_start:stage_iam.index("]", arns_start)]
+    assert "aws_ssm_parameter.bootstrap_complete.arn" in arns
+    assert "aws_ssm_parameter.whitelist_confirmed.arn" in arns
+    assert '"*"' not in stage_iam
     injection = stage_iam[stage_iam.index('"stage_readiness_injection"'):]
-    assert "aws_ssm_parameter.bootstrap_complete.arn" in injection
-    assert "aws_ssm_parameter.whitelist_confirmed.arn" in injection
-    assert '"*"' not in injection
+    assert "resources = local.readiness_gate_parameter_arns" in injection
     assert "role   = aws_iam_role.ecs_task_execution.id" in injection
     assert "for_each = toset(var.readiness_execution_role_names)" in injection
     assert not re.search(r'role\s*=\s*"', injection)  # attached by variable, never a literal

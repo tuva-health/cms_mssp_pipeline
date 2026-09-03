@@ -41,19 +41,16 @@ PLACEHOLDER_RE = re.compile(r"<[^>]+>")
 DEFAULT_PROJECT_NAME = "mssp-pipeline"
 TASKDEF_GLOB = "taskdef-*.json"
 
-# Readiness gate -> SSM parameter name. The foundation substrate creates these
-# two parameters (infra/terraform/aws/foundation/main.tf) and the bootstrap task
-# flips them to "true"; the readiness sidecar reads each gate from the
-# MSSP_READINESS_<GATE> env var. ECS injects the parameter value into that env
-# var as a container secret (valueFrom = the parameter ARN), which the
-# <READINESS_<GATE>_PARAM_ARN> placeholders resolve. A client overlay may
-# rename a parameter (READINESS_<GATE>_PARAM=/custom/name) or add a gate by
-# setting READINESS_<GATE>_PARAM for a new gate name.
+# Readiness gate -> SSM parameter name. These are the foundation's fixed gate
+# parameters (infra/terraform/aws/foundation/main.tf creates them, the
+# bootstrap task flips them to "true", stage_iam.tf grants exactly them). The
+# readiness sidecar reads each gate from the MSSP_READINESS_<GATE> env var;
+# ECS injects the parameter value into that env var as a container secret
+# (valueFrom = the parameter ARN), which <READINESS_<GATE>_PARAM_ARN> resolves.
 READINESS_GATE_PARAMETERS = {
     "bootstrap": "/mssp/bootstrap_complete",
     "whitelist": "/mssp/whitelist_confirmed",
 }
-READINESS_PARAM_ENV_RE = re.compile(r"^READINESS_([A-Z0-9_]+)_PARAM$")
 
 
 # ---- placeholder map -----------------------------------------------------
@@ -71,17 +68,6 @@ def _ssm_parameter_arn(region: str, account_id: str, name: str) -> str:
     return f"arn:aws:ssm:{region}:{account_id}:parameter/{name.lstrip('/')}"
 
 
-def readiness_parameter_names(env: Mapping[str, str]) -> dict[str, str]:
-    """Gate name -> SSM parameter name: the foundation defaults, overridden or
-    extended by any ``READINESS_<GATE>_PARAM`` set in the deploy env."""
-    names = dict(READINESS_GATE_PARAMETERS)
-    for key, value in env.items():
-        match = READINESS_PARAM_ENV_RE.match(key)
-        if match and value.strip():
-            names[match.group(1).lower()] = value.strip()
-    return names
-
-
 def build_placeholder_map(env: Mapping[str, str]) -> dict[str, str]:
     """Resolve the single substitution map from the deploy environment.
 
@@ -89,7 +75,8 @@ def build_placeholder_map(env: Mapping[str, str]) -> dict[str, str]:
     placeholder a template *does* reference but that is absent here is caught
     by the fail-closed check in :func:`render_text`.
     """
-    account_id = env.get("ACCOUNT_ID", "")
+    account_id = env.get("ACCOUNT_ID", "").strip()
+    region = env.get("REGION", "").strip()
     project_name = (env.get("PROJECT_NAME", DEFAULT_PROJECT_NAME).strip() or DEFAULT_PROJECT_NAME)
     bucket = env.get("FILE_STORE_BUCKET", "").strip()
     file_store_prefix = env.get("FILE_STORE_PREFIX", "").strip().strip("/")
@@ -98,7 +85,7 @@ def build_placeholder_map(env: Mapping[str, str]) -> dict[str, str]:
 
     mapping = {
         "<ACCOUNT_ID>": account_id,
-        "<REGION>": env.get("REGION", ""),
+        "<REGION>": region,
         # Resolved unconditionally: every template needs the pipeline image and
         # deploy-client.sh's require_immutable_image guard hard-fails before
         # render if it is unset. The connector image, needed only by dbt stages,
@@ -156,14 +143,13 @@ def build_placeholder_map(env: Mapping[str, str]) -> dict[str, str]:
     mapping.update({key: value for key, value in per_stage.items() if value})
 
     # Readiness gate parameter ARNs, injected into the readiness sidecar as ECS
-    # container secrets. They are pure functions of region + account + the gate
-    # parameter name, so every staged template resolves them without per-stage
-    # config -- but only when region and account are known: an ARN with an
-    # empty region or account is malformed, so leave the placeholders
-    # unresolved (fail closed) rather than bake one.
-    region = env.get("REGION", "").strip()
+    # container secrets. They are pure functions of region + account + the
+    # fixed gate parameter names, so every staged template resolves them
+    # without per-stage config -- but only when region and account are known:
+    # an ARN with an empty region or account is malformed, so leave the
+    # placeholders unresolved (fail closed) rather than bake one.
     if region and account_id:
-        for gate, name in readiness_parameter_names(env).items():
+        for gate, name in READINESS_GATE_PARAMETERS.items():
             placeholder = f"<READINESS_{gate.upper()}_PARAM_ARN>"
             mapping[placeholder] = _ssm_parameter_arn(region, account_id, name)
     return mapping

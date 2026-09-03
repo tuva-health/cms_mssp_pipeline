@@ -614,8 +614,8 @@ def _readiness_template(dir_: Path) -> Path:
 
 def test_readiness_param_arns_resolve_from_region_account_and_foundation_names(tmp_path):
     """The gate parameter ARNs are pure functions of REGION + ACCOUNT_ID + the
-    foundation parameter names, so every staged template's readiness sidecar
-    resolves them without per-stage config."""
+    foundation's fixed parameter names, so every staged template's readiness
+    sidecar resolves them without per-stage config."""
     ecs = tmp_path / "ecs"
     ecs.mkdir()
     out = tmp_path / "rendered"
@@ -632,24 +632,6 @@ def test_readiness_param_arns_resolve_from_region_account_and_foundation_names(t
     }
     # Checked, not asserted: the gate values are never plain env values.
     assert not [e for e in gate.get("environment", []) if e["name"].startswith("MSSP_READINESS_")]
-
-
-def test_readiness_param_name_is_overridable_and_extensible_from_env():
-    """READINESS_<GATE>_PARAM renames a foundation gate parameter or adds a
-    gate; the placeholder keeps the <READINESS_<GATE>_PARAM_ARN> shape."""
-    env = {
-        **BASE_ENV,
-        "READINESS_WHITELIST_PARAM": "/acme/whitelist_ok",
-        "READINESS_CUTOVER_PARAM": "/acme/cutover_approved",
-    }
-    mapping = render_taskdefs.build_placeholder_map(env)
-    assert mapping["<READINESS_BOOTSTRAP_PARAM_ARN>"] == READINESS_BOOTSTRAP_ARN
-    assert mapping["<READINESS_WHITELIST_PARAM_ARN>"] == (
-        "arn:aws:ssm:us-east-1:111122223333:parameter/acme/whitelist_ok"
-    )
-    assert mapping["<READINESS_CUTOVER_PARAM_ARN>"] == (
-        "arn:aws:ssm:us-east-1:111122223333:parameter/acme/cutover_approved"
-    )
 
 
 def test_readiness_param_arns_fail_closed_without_region_or_account(tmp_path):
