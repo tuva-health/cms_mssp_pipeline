@@ -69,7 +69,7 @@ terraform apply \
   -var runtime_task_definition_arn=arn:aws:ecs:...:task-definition/mssp-pipeline-runtime:1
 ```
 
-If you use `scripts/deploy-client.sh <client> activate`, the wrapper resolves the latest active `mssp-pipeline-runtime` revision automatically and passes it to Terraform, so you do not need to update `runtime_task_definition_arn` manually after each deploy.
+If you use `scripts/deploy-client.sh <client> activate`, the wrapper passes the exact `mssp-pipeline-runtime` revision recorded by `register-taskdefs` (in `<overlay>/rendered/task-definition-arns.json`) to Terraform, so you do not need to update `runtime_task_definition_arn` manually after each deploy.
 
 You can still override `events_invoke_role_arn`, `ecs_cluster_arn`, `ecs_subnet_ids`, and `ecs_security_group_ids` manually if needed.
 
@@ -86,8 +86,9 @@ scripts/deploy-client.sh <client> activate
 Typical image rollout:
 
 ```bash
-export IMAGE_TAG=2026-04-15-oomfix
-scripts/build-and-push-image.sh <client> "$IMAGE_TAG"
+RELEASE_ID=2026-04-15-oomfix
+scripts/build-and-push-image.sh <client> "$RELEASE_ID"
+export PIPELINE_IMAGE="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["image"])' "release-metadata/$RELEASE_ID.json")"
 scripts/deploy-client.sh <client> render-taskdefs
 scripts/deploy-client.sh <client> register-taskdefs
 scripts/deploy-client.sh <client> activate

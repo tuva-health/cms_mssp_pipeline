@@ -44,7 +44,8 @@ uv run mssp-runs --limit 10                      # inspect run manifests
 Preferred deploy flow:
 
 ```bash
-scripts/build-and-push-image.sh <client> <tag>
+scripts/build-and-push-image.sh <client> <release-id>   # writes release-metadata/<release-id>.json
+export PIPELINE_IMAGE=<repository@sha256 digest from that metadata>
 scripts/deploy-client.sh <client> render-taskdefs
 scripts/deploy-client.sh <client> register-taskdefs
 scripts/deploy-client.sh <client> activate
@@ -53,8 +54,8 @@ scripts/deploy-client.sh <client> activate
 One-command deploy + smoke test:
 
 ```bash
-scripts/deploy-and-smoke-client.sh <client> <tag>
-scripts/deploy-and-smoke-client.sh <client> <tag> -- mssp-validate --target process --strict
+scripts/deploy-and-smoke-client.sh <client> <release-id>
+scripts/deploy-and-smoke-client.sh <client> <release-id> -- mssp-validate --target process --strict
 ```
 
 One-command process-only ECS run:
@@ -66,12 +67,14 @@ scripts/run-client-process-task.sh <client> --database <db> --schema RAW_DATA
 
 Conventions:
 - `scripts/build-and-push-image.sh` derives Docker `PIP_EXTRAS` from `MSSP_OUTPUT_TYPE` (e.g. `processing,snowflake` for Snowflake).
-- `scripts/deploy-client.sh activate` automatically resolves the latest active `mssp-pipeline-runtime` task definition ARN.
-- `scripts/deploy-and-smoke-client.sh` wraps build/push + render/register/activate + one-off `aws ecs run-task` smoke execution against the latest runtime revision.
-- `scripts/run-client-process-task.sh` runs a one-off ECS task with command override `mssp-process` and destination overrides such as `SNOWFLAKE_DATABASE` / `SNOWFLAKE_SCHEMA`.
-- Client `env.sh` files should use overridable defaults such as `export IMAGE_TAG="${IMAGE_TAG:-latest}"` so shell overrides work.
-- When taskdef wiring and container behavior change together, use a fresh image tag, then render/register/activate before smoke testing.
-- For manual smoke runs, use a one-off `aws ecs run-task` against the latest runtime revision and tail `/ecs/mssp-pipeline` logs.
+- Images are immutable: `scripts/build-and-push-image.sh` pushes an immutable release tag and records the `repository@sha256` digest in `release-metadata/<release-id>.json`; `scripts/deploy-client.sh render-taskdefs` requires that digest as `PIPELINE_IMAGE` (no mutable `:tag`).
+- Revisions are exact: `register-taskdefs` records each registered task-definition ARN in `<overlay>/rendered/task-definition-arns.json`, and `activate` binds the recorded `mssp-pipeline-runtime` revision (never a "latest" family lookup).
+- `scripts/deploy-and-smoke-client.sh` wraps build/push + render/register/activate + a one-off `aws ecs run-task` smoke execution against the recorded runtime revision; the built release's digest is handed to the deploy as `PIPELINE_IMAGE`.
+- `scripts/run-client-process-task.sh` runs a one-off ECS task against the recorded runtime revision with command override `mssp-process` and destination overrides such as `SNOWFLAKE_DATABASE` / `SNOWFLAKE_SCHEMA`.
+- Both runners accept `--skip-build` (digest from `release-metadata/<release-id>.json` when a release id is given, else `PIPELINE_IMAGE`) and `--skip-deploy` (run the recorded revision as-is); a release id that does not match the recorded revision's image fails closed.
+- Client `env.sh` files must set `PIPELINE_IMAGE` as an overridable default, `export PIPELINE_IMAGE="${PIPELINE_IMAGE:-<repository@sha256>}"`, so the wrapper scripts can pass a freshly built digest through to `deploy-client.sh`.
+- When taskdef wiring and container behavior change together, build a fresh release, then render/register/activate before smoke testing.
+- For manual smoke runs, use a one-off `aws ecs run-task` against the recorded runtime revision ARN and tail `/ecs/mssp-pipeline` logs.
 
 ## Testing
 

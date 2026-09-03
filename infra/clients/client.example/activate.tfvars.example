@@ -14,7 +14,7 @@ foundation_state_backend    = "local"
 foundation_state_local_path = "../foundation/terraform.tfstate"
 
 # runtime_task_definition_arn is optional when using scripts/deploy-client.sh,
-# which will resolve the latest active mssp-pipeline-runtime revision at apply time.
+# which passes the exact mssp-pipeline-runtime revision recorded by register-taskdefs.
 # Set it only if you want to pin activate to a specific revision manually.
 # runtime_task_definition_arn = "<runtime-task-definition-arn>"
 

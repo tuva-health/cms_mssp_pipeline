@@ -94,20 +94,24 @@ uv run mssp-validate --target pipeline
 - `infra/terraform/aws/README.md` — Terraform skeleton usage for Foundation + Activate
 - `infra/clients/client.example/` — per-client overlay examples (`env.sh`, `*.tfvars`)
 - `scripts/check-client-config.sh` — validates AWS auth, required vars, and per-client tfvars before deploy
-- `scripts/build-and-push-image.sh` — builds and pushes linux/amd64 image to ECR for a client context; automatically installs backend extras based on `MSSP_OUTPUT_TYPE` (override with `PIP_EXTRAS`)
-- `scripts/deploy-client.sh` — wrapper to validate + apply foundation/activate and render/register ECS taskdefs; `activate` automatically resolves the latest active `mssp-pipeline-runtime` revision
+- `scripts/build-and-push-image.sh` — builds and pushes an immutable linux/amd64 release to ECR for a client context and records its `repository@sha256` digest in `release-metadata/<release-id>.json`; automatically installs backend extras based on `MSSP_OUTPUT_TYPE` (override with `PIP_EXTRAS`)
+- `scripts/deploy-client.sh` — wrapper to validate + apply foundation/activate and render/register ECS taskdefs; `render-taskdefs` requires the digest as `PIPELINE_IMAGE`, `register-taskdefs` records exact revision ARNs, and `activate` binds the recorded `mssp-pipeline-runtime` revision
+- `scripts/deploy-and-smoke-client.sh` / `scripts/run-client-process-task.sh` — one-command build + deploy + one-off ECS run against the recorded runtime revision (see `AGENTS.md`)
 
 Recommended ECS rollout:
 
 ```bash
-export IMAGE_TAG=2026-04-17-my-change
-scripts/build-and-push-image.sh <client> "$IMAGE_TAG"
+RELEASE_ID=2026-04-17-my-change
+scripts/build-and-push-image.sh <client> "$RELEASE_ID"
+export PIPELINE_IMAGE="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["image"])' "release-metadata/$RELEASE_ID.json")"
 scripts/deploy-client.sh <client> render-taskdefs
 scripts/deploy-client.sh <client> register-taskdefs
 scripts/deploy-client.sh <client> activate
 ```
 
-Use a fresh image tag when task definition wiring and container behavior change together (for example entrypoint/env/secret handling changes), then run a one-off smoke task before relying on the schedule.
+Or, in one command, `scripts/deploy-and-smoke-client.sh <client> "$RELEASE_ID"`, which hands the built digest to the deploy and smoke-runs the recorded revision.
+
+Build a fresh release when task definition wiring and container behavior change together (for example entrypoint/env/secret handling changes), then run a one-off smoke task before relying on the schedule.
 
 ---
 

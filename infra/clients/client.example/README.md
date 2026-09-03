@@ -22,7 +22,7 @@ scripts/run-client-process-task.sh acme --database MY_PROD_DB --schema RAW_DATA
 
 ## Files
 
-- `env.sh` (local only): AWS profile/region + render vars used for ECS task definitions (`FILE_STORE_PREFIX` and `OUTPUT_PREFIX` can be empty for bucket root); also holds backend-specific runtime settings such as Snowflake env values and secret IDs
+- `env.sh` (local only): AWS profile/region, the immutable `PIPELINE_IMAGE` digest (as an overridable default), + render vars used for ECS task definitions (`FILE_STORE_PREFIX` and `OUTPUT_PREFIX` can be empty for bucket root); also holds backend-specific runtime settings such as Snowflake env values and secret IDs
 - `foundation.tfvars`: inputs for `infra/terraform/aws/foundation`
 - `activate.tfvars`: inputs for `infra/terraform/aws/activate` (defaults to reading foundation local state)
 - `foundation.backend.hcl` / `activate.backend.hcl` (optional): backend config per stage for remote Terraform state
