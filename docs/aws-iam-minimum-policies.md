@@ -79,6 +79,37 @@ Do **not** grant runtime access to `mssp/cms-api-key` or `mssp/cms-api-secret`.
 
 ---
 
+## 2a) Task execution role: readiness gate injection
+
+Every workload task definition injects the readiness gate parameters into its
+`readiness-gates` container as ECS secrets (`valueFrom` = SSM parameter ARN).
+ECS resolves them with the task **execution** role, which therefore needs
+`ssm:GetParameters` on exactly those two parameters. Attach this to each
+execution role a workload task definition uses (the foundation Terraform does
+this for its own execution role and for any role listed in
+`readiness_execution_role_names`).
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "InjectReadinessGates",
+      "Effect": "Allow",
+      "Action": ["ssm:GetParameters"],
+      "Resource": [
+        "arn:aws:ssm:<REGION>:<ACCOUNT_ID>:parameter/mssp/bootstrap_complete",
+        "arn:aws:ssm:<REGION>:<ACCOUNT_ID>:parameter/mssp/whitelist_confirmed"
+      ]
+    }
+  ]
+}
+```
+
+The parameters are plain `String` type, so no `kms:Decrypt` is needed.
+
+---
+
 ## 3) ECS task execution role (managed baseline)
 
 Attach AWS managed policy:

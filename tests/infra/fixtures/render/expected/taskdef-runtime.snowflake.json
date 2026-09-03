@@ -33,6 +33,16 @@
           "value": "us-east-1"
         }
       ],
+      "secrets": [
+        {
+          "name": "MSSP_READINESS_BOOTSTRAP",
+          "valueFrom": "arn:aws:ssm:us-east-1:111122223333:parameter/mssp/bootstrap_complete"
+        },
+        {
+          "name": "MSSP_READINESS_WHITELIST",
+          "valueFrom": "arn:aws:ssm:us-east-1:111122223333:parameter/mssp/whitelist_confirmed"
+        }
+      ],
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {

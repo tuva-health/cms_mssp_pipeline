@@ -64,6 +64,25 @@ and exports:
 - `MSSP_WORKDIR` (default `/app`)
 - `MSSP_WRITE_CONFIG_TXT` (`auto`|`always`|`never`, default `auto`)
 
+### Readiness gate sidecar
+
+Every workload task definition runs a non-essential `readiness-gates`
+container (`python -m mssp_pipeline.readiness bootstrap whitelist`) that the
+workload container `dependsOn` with `condition: SUCCESS`. The evaluator reads
+each gate from `MSSP_READINESS_<GATE>` and requires the value `true`.
+
+Those env vars are never set as plain `environment` values (that would assert
+readiness instead of checking it). They are ECS container **secrets** whose
+`valueFrom` is the SSM parameter ARN, rendered from the engine placeholders:
+
+- `MSSP_READINESS_BOOTSTRAP` <- `<READINESS_BOOTSTRAP_PARAM_ARN>` (`/mssp/bootstrap_complete`)
+- `MSSP_READINESS_WHITELIST` <- `<READINESS_WHITELIST_PARAM_ARN>` (`/mssp/whitelist_confirmed`)
+
+ECS resolves the parameters with the task **execution** role at task start, so
+that role needs `ssm:GetParameters` on exactly those two parameters (see
+section 3). The parameter names are the foundation defaults; a client overlay
+may override one with `READINESS_<GATE>_PARAM=/custom/name` in its `env.sh`.
+
 ---
 
 ## 2) Bootstrap task contract
@@ -109,6 +128,10 @@ mssp-bootstrap-config
 - `secretsmanager:GetSecretValue` on `mssp/acoms-config`
 - backend-specific secret access only when the selected `MSSP_OUTPUT_TYPE` needs it
 - no access to CMS key/secret bootstrap inputs
+
+### Task execution role (every workload task definition)
+- `secretsmanager:GetSecretValue` on the secrets the task injects
+- `ssm:GetParameters` on `/mssp/bootstrap_complete` and `/mssp/whitelist_confirmed` only (readiness gate injection)
 
 ---
 

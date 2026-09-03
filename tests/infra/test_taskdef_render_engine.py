@@ -583,6 +583,88 @@ def test_missing_connector_image_fails_closed(tmp_path):
     assert "<CONNECTOR_IMAGE_URI>" in str(exc.value)
 
 
+# ---- readiness gate SSM parameter placeholders (TUVA-52) -----------------
+
+READINESS_BOOTSTRAP_ARN = "arn:aws:ssm:us-east-1:111122223333:parameter/mssp/bootstrap_complete"
+READINESS_WHITELIST_ARN = "arn:aws:ssm:us-east-1:111122223333:parameter/mssp/whitelist_confirmed"
+
+
+def _readiness_template(dir_: Path) -> Path:
+    """A staged template whose readiness sidecar injects the gates as secrets."""
+    return _write(
+        dir_,
+        "taskdef-download.json",
+        {
+            "family": "svc-download",
+            "containerDefinitions": [
+                {
+                    "name": "readiness-gates",
+                    "image": "<PIPELINE_IMAGE_URI>",
+                    "essential": False,
+                    "command": ["python", "-m", "mssp_pipeline.readiness", "bootstrap", "whitelist"],
+                    "secrets": [
+                        {"name": "MSSP_READINESS_BOOTSTRAP", "valueFrom": "<READINESS_BOOTSTRAP_PARAM_ARN>"},
+                        {"name": "MSSP_READINESS_WHITELIST", "valueFrom": "<READINESS_WHITELIST_PARAM_ARN>"},
+                    ],
+                }
+            ],
+        },
+    )
+
+
+def test_readiness_param_arns_resolve_from_region_account_and_foundation_names(tmp_path):
+    """The gate parameter ARNs are pure functions of REGION + ACCOUNT_ID + the
+    foundation parameter names, so every staged template's readiness sidecar
+    resolves them without per-stage config."""
+    ecs = tmp_path / "ecs"
+    ecs.mkdir()
+    out = tmp_path / "rendered"
+    _readiness_template(ecs)
+
+    render_taskdefs.render_all(str(ecs), str(out), BASE_ENV)
+
+    doc = json.loads((out / "taskdef-download.json").read_text(encoding="utf-8"))
+    gate = doc["containerDefinitions"][0]
+    secrets = {s["name"]: s["valueFrom"] for s in gate["secrets"]}
+    assert secrets == {
+        "MSSP_READINESS_BOOTSTRAP": READINESS_BOOTSTRAP_ARN,
+        "MSSP_READINESS_WHITELIST": READINESS_WHITELIST_ARN,
+    }
+    # Checked, not asserted: the gate values are never plain env values.
+    assert not [e for e in gate.get("environment", []) if e["name"].startswith("MSSP_READINESS_")]
+
+
+def test_readiness_param_name_is_overridable_and_extensible_from_env():
+    """READINESS_<GATE>_PARAM renames a foundation gate parameter or adds a
+    gate; the placeholder keeps the <READINESS_<GATE>_PARAM_ARN> shape."""
+    env = {
+        **BASE_ENV,
+        "READINESS_WHITELIST_PARAM": "/acme/whitelist_ok",
+        "READINESS_CUTOVER_PARAM": "/acme/cutover_approved",
+    }
+    mapping = render_taskdefs.build_placeholder_map(env)
+    assert mapping["<READINESS_BOOTSTRAP_PARAM_ARN>"] == READINESS_BOOTSTRAP_ARN
+    assert mapping["<READINESS_WHITELIST_PARAM_ARN>"] == (
+        "arn:aws:ssm:us-east-1:111122223333:parameter/acme/whitelist_ok"
+    )
+    assert mapping["<READINESS_CUTOVER_PARAM_ARN>"] == (
+        "arn:aws:ssm:us-east-1:111122223333:parameter/acme/cutover_approved"
+    )
+
+
+def test_readiness_param_arns_fail_closed_without_region_or_account(tmp_path):
+    """An SSM ARN with an empty region or account is malformed, so the
+    placeholders stay unresolved and the render fails closed."""
+    for missing in ("REGION", "ACCOUNT_ID"):
+        ecs = tmp_path / f"ecs-{missing}"
+        ecs.mkdir()
+        _readiness_template(ecs)
+        env = {k: v for k, v in BASE_ENV.items() if k != missing}
+        with pytest.raises(SystemExit) as exc:
+            render_taskdefs.render_all(str(ecs), str(tmp_path / f"out-{missing}"), env)
+        assert "<READINESS_BOOTSTRAP_PARAM_ARN>" in str(exc.value)
+
+
 # ---- register seam -------------------------------------------------------
 
 _FAKE_AWS = """#!/usr/bin/env python3

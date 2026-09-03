@@ -20,3 +20,12 @@ runtime_s3_resource_arns = [
   "arn:aws:s3:::<MSSP_BUCKET>",
   "arn:aws:s3:::<MSSP_BUCKET>/*",
 ]
+
+# Optional: per-stage ECS task execution roles provisioned outside this module
+# whose task definitions inject the readiness gates (/mssp/bootstrap_complete,
+# /mssp/whitelist_confirmed) as container secrets. Each listed role is granted
+# ssm:GetParameters on exactly those two parameters.
+# readiness_execution_role_names = [
+#   "mssp-pipeline-download-execution-role",
+#   "mssp-pipeline-snowflake-execution-role",
+# ]

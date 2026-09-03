@@ -23,6 +23,10 @@
       "environment": [
         { "name": "AWS_REGION", "value": "<REGION>" }
       ],
+      "secrets": [
+        { "name": "MSSP_READINESS_BOOTSTRAP", "valueFrom": "<READINESS_BOOTSTRAP_PARAM_ARN>" },
+        { "name": "MSSP_READINESS_WHITELIST", "valueFrom": "<READINESS_WHITELIST_PARAM_ARN>" }
+      ],
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {

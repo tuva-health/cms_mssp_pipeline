@@ -74,3 +74,9 @@ variable "connector_repository_name" {
   description = "ECR repository name for the connector image."
   default     = "mssp-connector"
 }
+
+variable "readiness_execution_role_names" {
+  type        = list(string)
+  description = "Names of additional ECS task execution roles (for example per-stage download/snowflake execution roles provisioned by a client overlay) that inject the readiness gate parameters as container secrets. Each is granted ssm:GetParameters on exactly the two gate parameters. The module's own execution role is always granted."
+  default     = []
+}

@@ -55,6 +55,20 @@ def test_runtime_workload_depends_on_readiness_gate() -> None:
     } in workload["dependsOn"]
 
 
+def test_readiness_gate_values_are_injected_from_ssm_not_asserted() -> None:
+    """The gate reads MSSP_READINESS_<GATE> from env; those must arrive as ECS
+    secrets resolved from the SSM parameter ARN placeholders, never as plain
+    environment values that would assert readiness instead of checking it."""
+    gate = containers("runtime")["readiness-gates"]
+    secrets = {s["name"]: s["valueFrom"] for s in gate["secrets"]}
+    assert secrets == {
+        "MSSP_READINESS_BOOTSTRAP": "<READINESS_BOOTSTRAP_PARAM_ARN>",
+        "MSSP_READINESS_WHITELIST": "<READINESS_WHITELIST_PARAM_ARN>",
+    }
+    env_names = {e["name"] for e in gate.get("environment", [])}
+    assert not {n for n in env_names if n.startswith("MSSP_READINESS_")}
+
+
 def test_bootstrap_does_not_depend_on_the_readiness_gate() -> None:
     # Bootstrap is what *sets* the readiness gates, so it must not require them.
     conts = containers("bootstrap")

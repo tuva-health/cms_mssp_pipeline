@@ -86,6 +86,28 @@ def test_foundation_adds_generic_hardening_engines() -> None:
     assert 'variable "data_bucket_name"' in variables
 
 
+def test_execution_roles_get_least_privilege_readiness_injection() -> None:
+    """ECS resolves the readiness-gate container secrets with the task
+    EXECUTION role, so the substrate grants ssm:GetParameters on exactly the two
+    gate parameters: to its own execution role unconditionally, and to any
+    per-stage execution role a client overlay lists by name (no wildcard,
+    no literal role name)."""
+    stage_iam = read(TF / "foundation" / "stage_iam.tf")
+    assert '"ssm:GetParameters"' in stage_iam
+    injection = stage_iam[stage_iam.index('"stage_readiness_injection"'):]
+    assert "aws_ssm_parameter.bootstrap_complete.arn" in injection
+    assert "aws_ssm_parameter.whitelist_confirmed.arn" in injection
+    assert '"*"' not in injection
+    assert "role   = aws_iam_role.ecs_task_execution.id" in injection
+    assert "for_each = toset(var.readiness_execution_role_names)" in injection
+    assert not re.search(r'role\s*=\s*"', injection)  # attached by variable, never a literal
+    variables = read(TF / "foundation" / "variables.tf")
+    assert 'variable "readiness_execution_role_names"' in variables
+    assert re.search(r'readiness_execution_role_names"\s*\{[^}]*default\s*=\s*\[\]', variables, re.S)
+    example = read(EXAMPLE / "foundation.tfvars.example")
+    assert "readiness_execution_role_names" in example
+
+
 def test_client_example_backends_use_native_locking() -> None:
     for name in (
         "bootstrap.backend.hcl.example",
