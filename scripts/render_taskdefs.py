@@ -16,8 +16,9 @@ not expressible as static placeholders -- opts in with a top-level marker::
     "x-mssp-render": {"augment": "output-backend"}
 
 The marker is capability-descriptive and client-neutral. It is stripped from
-the rendered output (ECS rejects unknown keys), so a marked template's rendered
-bytes match what the previous bespoke per-template renderer produced.
+the rendered output (ECS rejects unknown keys). The augmentation lands on the
+template's single *essential* container -- the workload -- so non-essential
+sidecars (e.g. ``readiness-gates``) are never handed the backend env/secrets.
 
 Usage:
     render_taskdefs.py render   <ecs_template_dir> <rendered_out_dir>
@@ -138,13 +139,37 @@ def render_text(template_text: str, mapping: Mapping[str, str], name: str) -> st
 
 # ---- output-backend augmentation ----------------------------------------
 
-def _augment_output_backend(doc: dict, env: Mapping[str, str], name: str) -> None:
-    """Apply the runtime output-backend augmentation to the first container.
+def _workload_container(doc: dict, name: str) -> dict:
+    """Return the single *essential* container -- the workload -- of ``doc``.
 
-    Mirrors the previous bespoke runtime renderer exactly: overrides the
-    ``MSSP_OUTPUT_*`` env on ``containerDefinitions[0]`` and, when the backend
-    is Snowflake, injects the Snowflake env plus the private-key secret(s)
-    that are supplied at render time rather than declared statically.
+    A taskdef may carry non-essential sidecars (the ``readiness-gates`` gate
+    in the canonical runtime template sits at ``containerDefinitions[0]``),
+    so the workload is selected by ``essential``, never by position. ECS
+    treats an omitted ``essential`` as ``true``. Zero or several essential
+    containers is ambiguous (which one should hold the backend secrets?), so
+    it fails closed rather than guessing; a template that legitimately needs
+    several essential containers should say which is the workload explicitly
+    (e.g. a future ``target`` field on the marker) rather than rely on order.
+    """
+    candidates = [
+        c for c in doc.get("containerDefinitions", []) if c.get("essential", True)
+    ]
+    if len(candidates) != 1:
+        found = [c.get("name", "?") for c in candidates]
+        raise SystemExit(
+            f"output-backend render of {name} needs exactly one essential "
+            f"(workload) container to augment; found {len(found)}: {found}"
+        )
+    return candidates[0]
+
+
+def _augment_output_backend(doc: dict, env: Mapping[str, str], name: str) -> None:
+    """Apply the runtime output-backend augmentation to the workload container.
+
+    Overrides the ``MSSP_OUTPUT_*`` env on the essential (workload) container
+    and, when the backend is Snowflake, injects the Snowflake env plus the
+    private-key secret(s) that are supplied at render time rather than
+    declared statically. Non-essential sidecars are left untouched (TUVA-47).
     """
     bucket = env.get("FILE_STORE_BUCKET", "").strip()
     output_prefix = env.get("OUTPUT_PREFIX", "").strip().strip("/")
@@ -157,7 +182,7 @@ def _augment_output_backend(doc: dict, env: Mapping[str, str], name: str) -> Non
         raise SystemExit(f"FILE_STORE_BUCKET is required for output-backend render of {name}")
     output_location = output_location_override or _s3_uri(bucket, output_prefix)
 
-    container = doc["containerDefinitions"][0]
+    container = _workload_container(doc, name)
     env_entries = {item["name"]: item for item in container.get("environment", [])}
     env_entries["MSSP_OUTPUT_TYPE"] = {"name": "MSSP_OUTPUT_TYPE", "value": output_type}
     env_entries["MSSP_OUTPUT_LOCATION"] = {"name": "MSSP_OUTPUT_LOCATION", "value": output_location}

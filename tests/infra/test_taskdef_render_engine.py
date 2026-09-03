@@ -107,7 +107,7 @@ def _write(dir_: Path, name: str, doc: dict) -> Path:
 
 
 def test_runtime_and_bootstrap_render_byte_identical_parquet(tmp_path):
-    """The two canonical templates render byte-for-byte as before (PARQUET)."""
+    """The two canonical templates render byte-for-byte to their goldens (PARQUET)."""
     ecs = _canonical_ecs(tmp_path)
     out = tmp_path / "rendered"
     render_taskdefs.render_all(str(ecs), str(out), {**BASE_ENV, "MSSP_OUTPUT_TYPE": "PARQUET"})
@@ -120,7 +120,8 @@ def test_runtime_and_bootstrap_render_byte_identical_parquet(tmp_path):
 
 
 def test_runtime_renders_byte_identical_snowflake(tmp_path):
-    """The Snowflake augmentation (env + injected secrets) is preserved exactly."""
+    """The Snowflake augmentation (env + injected secrets) renders exactly to
+    its golden -- on the workload container, not the sidecar (TUVA-47)."""
     ecs = _canonical_ecs(tmp_path)
     out = tmp_path / "rendered"
     render_taskdefs.render_all(str(ecs), str(out), SNOWFLAKE_ENV)
@@ -267,6 +268,100 @@ def test_synthetic_marked_template_injects_snowflake_secrets(tmp_path):
     secrets = {s["name"]: s["valueFrom"] for s in container["secrets"]}
     assert secrets["SNOWFLAKE_RSA_KEY"].endswith("rsa-key-DDDDDD")
     assert secrets["SNOWFLAKE_RSA_KEY_PASSPHRASE"].endswith("rsa-key-passphrase-EEEEEE")
+
+
+def test_augmentation_lands_on_workload_not_readiness_sidecar(tmp_path):
+    """The output-backend augmentation targets the essential *workload*
+    container, never the non-essential readiness-gates sidecar (TUVA-47).
+
+    In the canonical runtime template the sidecar is ``containerDefinitions[0]``
+    and the workload is ``[1]``; the workload is the container that actually
+    needs the ``MSSP_OUTPUT_*`` overrides and the Snowflake env + key secrets.
+    """
+    ecs = _canonical_ecs(tmp_path)
+    out = tmp_path / "rendered"
+    render_taskdefs.render_all(str(ecs), str(out), SNOWFLAKE_ENV)
+
+    doc = json.loads((out / "taskdef-runtime.json").read_text(encoding="utf-8"))
+    containers = {c["name"]: c for c in doc["containerDefinitions"]}
+    sidecar, workload = containers["readiness-gates"], containers["mssp-runtime"]
+    assert sidecar["essential"] is False and workload["essential"] is True
+
+    workload_env = {e["name"]: e["value"] for e in workload["environment"]}
+    assert workload_env["MSSP_OUTPUT_TYPE"] == "SNOWFLAKE"
+    assert workload_env["MSSP_OUTPUT_LOCATION"] == "s3://example-mssp-bucket/processed/output"
+    assert workload_env["SNOWFLAKE_ACCOUNT"] == "acme-org.us-east-1"
+    assert workload_env["SNOWFLAKE_RSA_KEY_PATH"] == "/tmp/snowflake_rsa_key.p8"
+    # Statically declared workload env survives alongside the injected values.
+    assert workload_env["MSSP_ACO_ID"] == "A9999"
+    workload_secrets = {s["name"]: s["valueFrom"] for s in workload["secrets"]}
+    assert workload_secrets["ACOMS_CONFIG_TXT"].endswith("acoms-config-AAAAAA")
+    assert workload_secrets["SNOWFLAKE_RSA_KEY"].endswith("rsa-key-DDDDDD")
+    assert workload_secrets["SNOWFLAKE_RSA_KEY_PASSPHRASE"].endswith("rsa-key-passphrase-EEEEEE")
+
+    # The sidecar is untouched: only its static env, and no secrets at all.
+    assert sidecar["environment"] == [{"name": "AWS_REGION", "value": "us-east-1"}]
+    assert "secrets" not in sidecar
+
+
+def test_omitted_essential_defaults_to_workload(tmp_path):
+    """ECS treats an omitted ``essential`` as true, so a workload that never
+    spells it out is still selected over a non-essential sidecar at index 0."""
+    ecs = tmp_path / "ecs"
+    ecs.mkdir()
+    out = tmp_path / "rendered"
+    _write(
+        ecs,
+        "taskdef-stage.json",
+        {
+            "x-mssp-render": {"augment": "output-backend"},
+            "family": "mssp-pipeline-stage",
+            "containerDefinitions": [
+                {"name": "gate", "image": "<PIPELINE_IMAGE_URI>", "essential": False},
+                {"name": "worker", "image": "<PIPELINE_IMAGE_URI>"},
+            ],
+        },
+    )
+
+    render_taskdefs.render_all(str(ecs), str(out), {**BASE_ENV, "MSSP_OUTPUT_TYPE": "PARQUET"})
+
+    doc = json.loads((out / "taskdef-stage.json").read_text(encoding="utf-8"))
+    gate, worker = doc["containerDefinitions"]
+    assert "environment" not in gate
+    worker_env = {e["name"]: e["value"] for e in worker["environment"]}
+    assert worker_env["MSSP_OUTPUT_TYPE"] == "PARQUET"
+
+
+@pytest.mark.parametrize(
+    "essentials",
+    [
+        pytest.param([False], id="none-essential"),
+        pytest.param([True, True], id="two-essential"),
+    ],
+)
+def test_marked_template_without_single_workload_fails_closed(tmp_path, essentials):
+    """A marked template must have exactly one essential (workload) container
+    to augment; zero or several is ambiguous and fails the render closed."""
+    ecs = tmp_path / "ecs"
+    ecs.mkdir()
+    out = tmp_path / "rendered"
+    _write(
+        ecs,
+        "taskdef-stage.json",
+        {
+            "x-mssp-render": {"augment": "output-backend"},
+            "family": "mssp-pipeline-stage",
+            "containerDefinitions": [
+                {"name": f"c{i}", "image": "<PIPELINE_IMAGE_URI>", "essential": e}
+                for i, e in enumerate(essentials)
+            ],
+        },
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        render_taskdefs.render_all(str(ecs), str(out), {**BASE_ENV, "MSSP_OUTPUT_TYPE": "PARQUET"})
+    assert "exactly one essential" in str(exc.value)
+    assert not (out / "taskdef-stage.json").exists()
 
 
 def test_unmarked_template_is_pure_substitution(tmp_path):

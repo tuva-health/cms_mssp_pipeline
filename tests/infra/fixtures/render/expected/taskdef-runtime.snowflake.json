@@ -31,50 +31,6 @@
         {
           "name": "AWS_REGION",
           "value": "us-east-1"
-        },
-        {
-          "name": "MSSP_OUTPUT_TYPE",
-          "value": "SNOWFLAKE"
-        },
-        {
-          "name": "MSSP_OUTPUT_LOCATION",
-          "value": "s3://example-mssp-bucket/processed/output"
-        },
-        {
-          "name": "MSSP_TEMP_LOCATION",
-          "value": "/tmp/mssp-staging"
-        },
-        {
-          "name": "MSSP_DOWNLOAD_MODE",
-          "value": "incremental"
-        },
-        {
-          "name": "SNOWFLAKE_USERNAME",
-          "value": "svc_mssp"
-        },
-        {
-          "name": "SNOWFLAKE_ACCOUNT",
-          "value": "acme-org.us-east-1"
-        },
-        {
-          "name": "SNOWFLAKE_DATABASE",
-          "value": "MSSP"
-        },
-        {
-          "name": "SNOWFLAKE_SCHEMA",
-          "value": "RAW_DATA"
-        },
-        {
-          "name": "SNOWFLAKE_COMPUTE_WAREHOUSE",
-          "value": "COMPUTE_WH"
-        },
-        {
-          "name": "SNOWFLAKE_ACCOUNT_ROLE",
-          "value": "ACCOUNTADMIN"
-        },
-        {
-          "name": "SNOWFLAKE_RSA_KEY_PATH",
-          "value": "/tmp/snowflake_rsa_key.p8"
         }
       ],
       "logConfiguration": {
@@ -84,17 +40,7 @@
           "awslogs-region": "us-east-1",
           "awslogs-stream-prefix": "readiness"
         }
-      },
-      "secrets": [
-        {
-          "name": "SNOWFLAKE_RSA_KEY",
-          "valueFrom": "arn:aws:secretsmanager:us-east-1:111122223333:secret:mssp/snowflake/rsa-key-DDDDDD"
-        },
-        {
-          "name": "SNOWFLAKE_RSA_KEY_PASSPHRASE",
-          "valueFrom": "arn:aws:secretsmanager:us-east-1:111122223333:secret:mssp/snowflake/rsa-key-passphrase-EEEEEE"
-        }
-      ]
+      }
     },
     {
       "name": "mssp-runtime",
@@ -132,7 +78,7 @@
         },
         {
           "name": "MSSP_OUTPUT_TYPE",
-          "value": "PARQUET"
+          "value": "SNOWFLAKE"
         },
         {
           "name": "MSSP_OUTPUT_LOCATION",
@@ -149,12 +95,48 @@
         {
           "name": "AWS_REGION",
           "value": "us-east-1"
+        },
+        {
+          "name": "SNOWFLAKE_USERNAME",
+          "value": "svc_mssp"
+        },
+        {
+          "name": "SNOWFLAKE_ACCOUNT",
+          "value": "acme-org.us-east-1"
+        },
+        {
+          "name": "SNOWFLAKE_DATABASE",
+          "value": "MSSP"
+        },
+        {
+          "name": "SNOWFLAKE_SCHEMA",
+          "value": "RAW_DATA"
+        },
+        {
+          "name": "SNOWFLAKE_COMPUTE_WAREHOUSE",
+          "value": "COMPUTE_WH"
+        },
+        {
+          "name": "SNOWFLAKE_ACCOUNT_ROLE",
+          "value": "ACCOUNTADMIN"
+        },
+        {
+          "name": "SNOWFLAKE_RSA_KEY_PATH",
+          "value": "/tmp/snowflake_rsa_key.p8"
         }
       ],
       "secrets": [
         {
           "name": "ACOMS_CONFIG_TXT",
           "valueFrom": "arn:aws:secretsmanager:us-east-1:111122223333:secret:mssp/acoms-config-AAAAAA"
+        },
+        {
+          "name": "SNOWFLAKE_RSA_KEY",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:111122223333:secret:mssp/snowflake/rsa-key-DDDDDD"
+        },
+        {
+          "name": "SNOWFLAKE_RSA_KEY_PASSPHRASE",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:111122223333:secret:mssp/snowflake/rsa-key-passphrase-EEEEEE"
         }
       ],
       "logConfiguration": {

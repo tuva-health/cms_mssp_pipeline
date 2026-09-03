@@ -31,22 +31,6 @@
         {
           "name": "AWS_REGION",
           "value": "us-east-1"
-        },
-        {
-          "name": "MSSP_OUTPUT_TYPE",
-          "value": "PARQUET"
-        },
-        {
-          "name": "MSSP_OUTPUT_LOCATION",
-          "value": "s3://example-mssp-bucket/processed/output"
-        },
-        {
-          "name": "MSSP_TEMP_LOCATION",
-          "value": "/tmp/mssp-staging"
-        },
-        {
-          "name": "MSSP_DOWNLOAD_MODE",
-          "value": "incremental"
         }
       ],
       "logConfiguration": {
