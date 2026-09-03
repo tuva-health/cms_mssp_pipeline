@@ -117,8 +117,17 @@ class MCQMProcessor(FileProcessor):
                     f"SELECT * FROM glob({sql_string_literal(glob_pattern)})"
                 ).fetchall()
             except duckdb.IOException as e:
-                print(f"  Warning: could not list MCQM zip contents ({zip_path}): {e}")
-                continue
+                # zipfs raises "No files found that match the pattern" for an
+                # archive that holds no matching member; that is a real empty.
+                # Any other IOException (403, expired credentials, unreachable
+                # store) means the archive could not be listed and must not be
+                # read as "no measures delivered", which would skip the table
+                # and still report success.
+                if is_empty_glob(e):
+                    continue
+                raise SourceDiscoveryError(
+                    f"Could not list MCQM zip contents (pattern={glob_pattern}): {e}"
+                ) from e
             for row in rows:
                 zip_ref = row[0]  # e.g. 'zip://s3://bucket/path/file!internal.csv'
                 internal_name = zip_ref.split("!")[-1]
