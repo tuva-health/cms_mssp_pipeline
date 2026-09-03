@@ -299,9 +299,14 @@ def test_augmentation_lands_on_workload_not_readiness_sidecar(tmp_path):
     assert workload_secrets["SNOWFLAKE_RSA_KEY"].endswith("rsa-key-DDDDDD")
     assert workload_secrets["SNOWFLAKE_RSA_KEY_PASSPHRASE"].endswith("rsa-key-passphrase-EEEEEE")
 
-    # The sidecar is untouched: only its static env, and no secrets at all.
+    # The sidecar is untouched by the augmentation: only its static env, and
+    # only the readiness-gate secrets the template itself declares (TUVA-52) --
+    # no Snowflake key material lands on it.
     assert sidecar["environment"] == [{"name": "AWS_REGION", "value": "us-east-1"}]
-    assert "secrets" not in sidecar
+    assert {s["name"] for s in sidecar["secrets"]} == {
+        "MSSP_READINESS_BOOTSTRAP",
+        "MSSP_READINESS_WHITELIST",
+    }
 
 
 def test_omitted_essential_defaults_to_workload(tmp_path):
