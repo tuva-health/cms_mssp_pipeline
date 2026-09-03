@@ -50,6 +50,11 @@ These are consumed by `activate` and task-definition rendering/registration.
 Checks gates:
 - `/mssp/bootstrap_complete == true`
 - `/mssp/whitelist_confirmed == true`
+
+(The same two parameters are injected into each workload task's
+`readiness-gates` container as ECS secrets; foundation grants the task
+execution roles `ssm:GetParameters` on exactly them -- see `stage_iam.tf` and
+`readiness_execution_role_names`.)
 - `mssp/acoms-config` current value is non-empty
 
 Then creates/enables schedule target for ECS task.

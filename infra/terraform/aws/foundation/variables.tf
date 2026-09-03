@@ -77,6 +77,6 @@ variable "connector_repository_name" {
 
 variable "readiness_execution_role_names" {
   type        = list(string)
-  description = "Names of additional ECS task execution roles (for example per-stage download/snowflake execution roles provisioned by a client overlay) that inject the readiness gate parameters as container secrets. Each is granted ssm:GetParameters on exactly the two gate parameters. The module's own execution role is always granted."
+  description = "Names of additional ECS task execution roles (for example per-stage download/snowflake execution roles provisioned by a client overlay) that inject the readiness gate parameters as container secrets. Each is granted ssm:GetParameters on exactly the two gate parameters. The module's own execution role is always granted. Listed roles are attached by name and must already exist when this module is applied; the module neither creates nor depends on them."
   default     = []
 }

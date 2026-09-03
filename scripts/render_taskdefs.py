@@ -51,6 +51,8 @@ READINESS_GATE_PARAMETERS = {
     "bootstrap": "/mssp/bootstrap_complete",
     "whitelist": "/mssp/whitelist_confirmed",
 }
+READINESS_MODULE = "mssp_pipeline.readiness"
+READINESS_ENV_PREFIX = "MSSP_READINESS_"
 
 
 # ---- placeholder map -----------------------------------------------------
@@ -64,7 +66,7 @@ def _role_arn(account_id: str, project_name: str, suffix: str) -> str:
 
 
 def _ssm_parameter_arn(region: str, account_id: str, name: str) -> str:
-    # SSM parameter ARNs carry the leading "/" of the name: parameter/mssp/x.
+    # The name's leading "/" becomes the "/" after "parameter": parameter/mssp/x.
     return f"arn:aws:ssm:{region}:{account_id}:parameter/{name.lstrip('/')}"
 
 
@@ -163,6 +165,55 @@ def render_text(template_text: str, mapping: Mapping[str, str], name: str) -> st
     if left:
         raise SystemExit(f"Unresolved placeholders in {name}: {sorted(set(left))}")
     return text
+
+
+# ---- readiness injection guard ------------------------------------------
+
+def _readiness_env_key(gate: str) -> str:
+    # Mirrors mssp_pipeline.readiness._env_key: gate "bootstrap" -> MSSP_READINESS_BOOTSTRAP.
+    return READINESS_ENV_PREFIX + gate.upper().replace("-", "_")
+
+
+def _readiness_gates_of(container: dict) -> list[str]:
+    """Gate names a container checks (``python -m mssp_pipeline.readiness <gate> ...``)."""
+    command = container.get("command") or []
+    if READINESS_MODULE not in command:
+        return []
+    return list(command[command.index(READINESS_MODULE) + 1:])
+
+
+def check_readiness_injection(doc: dict, name: str) -> None:
+    """Fail closed unless every readiness gate is *checked* from an ECS secret.
+
+    The readiness evaluator reads ``MSSP_READINESS_<GATE>`` from its
+    environment. A template that omits the secret leaves the gate reading
+    "missing" (exit 1, workload blocked -- the original TUVA-52 bug); one that
+    sets it as a plain ``environment`` value asserts readiness instead of
+    checking it. Either is a render error, on any container, in any template.
+    """
+    for container in doc.get("containerDefinitions", []):
+        cname = container.get("name", "?")
+        asserted = sorted(
+            e.get("name", "")
+            for e in container.get("environment", [])
+            if e.get("name", "").startswith(READINESS_ENV_PREFIX)
+        )
+        if asserted:
+            raise SystemExit(
+                f"{name}: container {cname!r} asserts readiness via environment "
+                f"{asserted}; gates must be ECS secrets (valueFrom = the SSM parameter ARN)"
+            )
+        gates = _readiness_gates_of(container)
+        if not gates:
+            continue
+        declared = {s.get("name") for s in container.get("secrets", [])}
+        missing = [g for g in gates if _readiness_env_key(g) not in declared]
+        if missing:
+            raise SystemExit(
+                f"{name}: readiness container {cname!r} checks gates {gates} but "
+                f"declares no {[_readiness_env_key(g) for g in missing]} secret; "
+                f"add it with valueFrom <READINESS_<GATE>_PARAM_ARN>"
+            )
 
 
 # ---- output-backend augmentation ----------------------------------------
@@ -277,6 +328,7 @@ def render_template(path: Path, mapping: Mapping[str, str], env: Mapping[str, st
 
     if marker is None:
         # Pure substitution -- emit verbatim, no re-serialization.
+        check_readiness_injection(json.loads(substituted), path.name)
         return substituted
 
     augment = marker.get("augment") if isinstance(marker, dict) else None
@@ -286,6 +338,7 @@ def render_template(path: Path, mapping: Mapping[str, str], env: Mapping[str, st
 
     doc = json.loads(substituted)
     augmenter(doc, env, path.name)
+    check_readiness_injection(doc, path.name)
     doc.pop(MARKER_KEY, None)  # strip marker; ECS rejects unknown keys
     return json.dumps(doc, indent=2) + "\n"
 

@@ -639,17 +639,60 @@ def test_readiness_param_arns_resolve_from_region_account_and_foundation_names(t
     assert not [e for e in gate.get("environment", []) if e["name"].startswith("MSSP_READINESS_")]
 
 
-def test_readiness_param_arns_fail_closed_without_region_or_account(tmp_path):
+@pytest.mark.parametrize("missing", ["REGION", "ACCOUNT_ID"])
+def test_readiness_param_arns_fail_closed_without_region_or_account(tmp_path, missing):
     """An SSM ARN with an empty region or account is malformed, so the
     placeholders stay unresolved and the render fails closed."""
-    for missing in ("REGION", "ACCOUNT_ID"):
-        ecs = tmp_path / f"ecs-{missing}"
-        ecs.mkdir()
-        _readiness_template(ecs)
-        env = {k: v for k, v in BASE_ENV.items() if k != missing}
-        with pytest.raises(SystemExit) as exc:
-            render_taskdefs.render_all(str(ecs), str(tmp_path / f"out-{missing}"), env)
-        assert "<READINESS_BOOTSTRAP_PARAM_ARN>" in str(exc.value)
+    ecs = tmp_path / "ecs"
+    ecs.mkdir()
+    _readiness_template(ecs)
+    env = {k: v for k, v in BASE_ENV.items() if k != missing}
+    with pytest.raises(SystemExit) as exc:
+        render_taskdefs.render_all(str(ecs), str(tmp_path / "out"), env)
+    assert "<READINESS_BOOTSTRAP_PARAM_ARN>" in str(exc.value)
+
+
+def test_render_fails_closed_when_a_readiness_gate_has_no_secret(tmp_path):
+    """A readiness container that checks a gate without declaring its secret
+    would read "missing" at runtime (the original bug), so the render refuses
+    it -- on any template, marker or not."""
+    ecs = tmp_path / "ecs"
+    ecs.mkdir()
+    _write(
+        ecs,
+        "taskdef-download.json",
+        {
+            "family": "svc-download",
+            "containerDefinitions": [
+                {
+                    "name": "readiness-gates",
+                    "image": "<PIPELINE_IMAGE_URI>",
+                    "essential": False,
+                    "command": ["python", "-m", "mssp_pipeline.readiness", "bootstrap", "whitelist"],
+                    "secrets": [
+                        {"name": "MSSP_READINESS_BOOTSTRAP", "valueFrom": "<READINESS_BOOTSTRAP_PARAM_ARN>"},
+                    ],
+                }
+            ],
+        },
+    )
+    with pytest.raises(SystemExit) as exc:
+        render_taskdefs.render_all(str(ecs), str(tmp_path / "out"), BASE_ENV)
+    assert "MSSP_READINESS_WHITELIST" in str(exc.value)
+    assert not (tmp_path / "out" / "taskdef-download.json").exists()
+
+
+def test_render_fails_closed_on_asserted_readiness_environment(tmp_path):
+    """MSSP_READINESS_* as a plain environment value asserts readiness instead
+    of checking it (the TUVA-46 hand-injection); the render refuses it."""
+    ecs = tmp_path / "ecs"
+    ecs.mkdir()
+    doc = json.loads(_readiness_template(ecs).read_text(encoding="utf-8"))
+    doc["containerDefinitions"][0]["environment"] = [{"name": "MSSP_READINESS_BOOTSTRAP", "value": "true"}]
+    _write(ecs, "taskdef-download.json", doc)
+    with pytest.raises(SystemExit) as exc:
+        render_taskdefs.render_all(str(ecs), str(tmp_path / "out"), BASE_ENV)
+    assert "asserts readiness via environment" in str(exc.value)
 
 
 # ---- register seam -------------------------------------------------------

@@ -83,6 +83,13 @@ that role needs `ssm:GetParameters` on exactly those two parameters (see
 section 3). The parameter names are fixed by the foundation; the ARNs are
 derived from the deploy `REGION` + `ACCOUNT_ID`, so no overlay value is needed.
 
+This applies to every task definition an overlay adds (download, raw, dbt,
+...), not only the canonical runtime template: any container whose command
+runs `mssp_pipeline.readiness <gate> ...` must declare a
+`MSSP_READINESS_<GATE>` secret for each named gate. The render engine fails
+closed on a template that omits one, or that sets any `MSSP_READINESS_*` as a
+plain `environment` value, so the sidecar can never read "missing" at runtime.
+
 ---
 
 ## 2) Bootstrap task contract
