@@ -484,6 +484,12 @@ Pull requests to `main` must pass the CI workflow (`test`, `lock`, `terraform`, 
 
 ---
 
+## Releases
+
+Releases are semver tags `vX.Y.Z` on `main`. Each one has an entry in [`CHANGELOG.md`](CHANGELOG.md) and a GitHub Release carrying the immutable image digest and the release metadata produced by `scripts/build-and-push-image.sh`. A release stays marked pre-release until a client deployment has validated it end to end.
+
+---
+
 ## Binary
 
 `bin/acoms-cli` is the CMS-provided CLI binary used locally. For container/AWS deployments, place the Linux x86_64 binary at `bin/acoms-cli-linux` (the Docker build copies it to `/app/bin/acoms-cli`).
