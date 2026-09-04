@@ -480,6 +480,8 @@ uv run pytest tests/processing/ -v
 
 Tests use synthetic fixture data and mock all subprocess calls. Do not run tests against real cloud backends or the live CMS Datahub.
 
+Pull requests to `main` must pass the CI workflow (`test`, `lock`, `terraform`, `shell`, `image`); see [docs/ci.md](docs/ci.md) for what each job proves and how to run the same checks locally.
+
 ---
 
 ## Binary
