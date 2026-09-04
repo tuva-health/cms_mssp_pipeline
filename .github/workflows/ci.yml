@@ -1,0 +1,164 @@
+# PR gate for the canonical pipeline repository.
+#
+# Every job runs offline: the test suite uses fakes for AWS (moto) and a fake
+# `aws` on PATH, Terraform is initialised without a backend, and the image is
+# built but never pushed. The only network traffic is to package and provider
+# registries. No secrets are required and none are read.
+#
+# Job names are referenced by branch protection as required status checks
+# (see docs/ci.md). Rename a job only together with the protection rule.
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # boto3 must never fall through to the instance metadata service on the
+      # runner; every AWS call in the suite is served by moto or a fake.
+      AWS_EC2_METADATA_DISABLED: "true"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Read the pinned uv version from the Dockerfile
+        id: uv
+        run: |
+          version="$(sed -n 's/^ARG UV_VERSION=//p' Dockerfile)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ steps.uv.outputs.version }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Run the test suite on each supported interpreter
+        # One job rather than a matrix so the required check stays named
+        # exactly `test`. 3.10 is the `requires-python` floor; 3.11 is the
+        # interpreter the runtime image ships (python:3.11-slim).
+        run: |
+          set -euo pipefail
+          # tests/test_lease_backends.py errors when AWS_PROFILE names a
+          # profile the runner does not have; the suite must see it unset.
+          unset AWS_PROFILE
+          for python in 3.10 3.11; do
+            echo "::group::python $python"
+            export UV_PYTHON="$python" UV_PROJECT_ENVIRONMENT=".venv-$python"
+            uv sync --frozen
+            uv run --frozen python -c 'import sys; print(sys.version)'
+            uv run --frozen pytest
+            echo "::endgroup::"
+          done
+
+  lock:
+    name: lock
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Read the pinned uv version from the Dockerfile
+        id: uv
+        run: |
+          version="$(sed -n 's/^ARG UV_VERSION=//p' Dockerfile)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ steps.uv.outputs.version }}
+          enable-cache: false
+
+      - name: Check that uv.lock matches pyproject.toml
+        run: uv lock --check
+
+  terraform:
+    name: terraform
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: infra/terraform/aws
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Read the pinned Terraform version
+        id: terraform
+        run: echo "version=$(tr -d '[:space:]' < "${{ github.workspace }}/.terraform-version")" >> "$GITHUB_OUTPUT"
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ steps.terraform.outputs.version }}
+          terraform_wrapper: false
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive -diff
+
+      - name: terraform validate every root
+        run: |
+          set -euo pipefail
+          for root in foundation bootstrap activate modules/lease-table; do
+            echo "::group::$root"
+            terraform -chdir="$root" init -backend=false -input=false
+            terraform -chdir="$root" validate
+            echo "::endgroup::"
+          done
+
+  shell:
+    name: shell
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: shellcheck
+        # Default severity (style): the scripts pass clean at that level today.
+        run: |
+          shellcheck --version
+          shellcheck scripts/*.sh docker/*.sh
+
+  image:
+    name: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Compute the dependency checksum
+        id: deps
+        # Same recipe as scripts/build-and-push-image.sh. The extras below are a
+        # fixed choice for the gate; the release script derives them from the
+        # client's MSSP_OUTPUT_TYPE.
+        run: echo "checksum=$(sha256sum uv.lock | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build the runtime image (no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          load: false
+          build-args: |
+            SOURCE_COMMIT=${{ github.sha }}
+            RELEASE_ID=ci-${{ github.run_id }}
+            DEPENDENCY_CHECKSUM=${{ steps.deps.outputs.checksum }}
+            PIP_EXTRAS=processing,snowflake
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
