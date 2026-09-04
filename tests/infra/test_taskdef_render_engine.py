@@ -438,7 +438,7 @@ STAGED_ENV = {
 
 def test_per_stage_placeholders_resolve(tmp_path):
     """The engine keeps its documented promise: a client overlay can drop in
-    per-stage taskdefs (download / raw-* / dbt-*) and have every per-stage
+    per-stage taskdefs (download / raw-* / dbt-* / sequencer) and have every per-stage
     placeholder resolved by the same loop -- no code change per stage."""
     ecs = tmp_path / "ecs"
     ecs.mkdir()
@@ -510,6 +510,22 @@ def test_per_stage_placeholders_resolve(tmp_path):
         },
     )
 
+    _write(
+        ecs,
+        "taskdef-sequencer.json",
+        {
+            "family": "svc-sequencer",
+            "executionRoleArn": "<SNOWFLAKE_EXECUTION_ROLE_ARN>",
+            "taskRoleArn": "<SEQUENCER_TASK_ROLE_ARN>",
+            "containerDefinitions": [
+                {
+                    "name": "sequencer",
+                    "image": "<PIPELINE_IMAGE_URI>",
+                    "command": ["python", "-m", "mssp_pipeline.sequencer_overlay"],
+                }
+            ],
+        },
+    )
     render_taskdefs.render_all(str(ecs), str(out), STAGED_ENV)
 
     # No unresolved placeholder survived in any rendered output.
@@ -537,6 +553,9 @@ def test_per_stage_placeholders_resolve(tmp_path):
     denv = {e["name"]: e["value"] for e in dbt["containerDefinitions"][0]["environment"]}
     assert denv["SNOWFLAKE_QUERY_TAG"] == "svc-dbt-dev"  # dev tag, distinct from prod
     assert "--database MSSP_DEV" in " ".join(dbt["containerDefinitions"][0]["command"])
+    seq = json.loads((out / "taskdef-sequencer.json").read_text(encoding="utf-8"))
+    assert seq["executionRoleArn"].endswith(":role/mssp-pipeline-snowflake-execution-role")
+    assert seq["taskRoleArn"].endswith(":role/mssp-pipeline-sequencer-task-role")
 
 
 def test_query_tag_dev_and_prod_resolve_distinctly(tmp_path):

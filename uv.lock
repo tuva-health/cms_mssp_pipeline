@@ -1228,6 +1228,10 @@ dynamodb = [
     { name = "docker" },
     { name = "py-partiql-parser" },
 ]
+s3 = [
+    { name = "py-partiql-parser" },
+    { name = "pyyaml" },
+]
 
 [[package]]
 name = "msal"
@@ -1323,7 +1327,7 @@ dev = [
     { name = "duckdb" },
     { name = "google-cloud-storage" },
     { name = "keyring" },
-    { name = "moto", extra = ["dynamodb"] },
+    { name = "moto", extra = ["dynamodb", "s3"] },
     { name = "openpyxl" },
     { name = "pytest" },
     { name = "snowflake-connector-python" },
@@ -1377,7 +1381,7 @@ dev = [
     { name = "duckdb" },
     { name = "google-cloud-storage" },
     { name = "keyring" },
-    { name = "moto", extras = ["dynamodb"], specifier = ">=5.0" },
+    { name = "moto", extras = ["dynamodb", "s3"], specifier = ">=5.0" },
     { name = "openpyxl" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "snowflake-connector-python" },

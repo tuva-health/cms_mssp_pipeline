@@ -107,6 +107,7 @@ def build_placeholder_map(env: Mapping[str, str]) -> dict[str, str]:
         "<RAW_TASK_ROLE_ARN>": _role_arn(account_id, project_name, "raw-task-role"),
         "<DBT_TASK_ROLE_ARN>": _role_arn(account_id, project_name, "dbt-task-role"),
         "<SNOWFLAKE_EXECUTION_ROLE_ARN>": _role_arn(account_id, project_name, "snowflake-execution-role"),
+        "<SEQUENCER_TASK_ROLE_ARN>": _role_arn(account_id, project_name, "sequencer-task-role"),
         "<ACOMS_CONFIG_SECRET_ARN>": env.get("ACOMS_CONFIG_SECRET_ARN", ""),
         "<CMS_API_KEY_SECRET_ARN>": env.get("CMS_API_KEY_SECRET_ARN", ""),
         "<CMS_API_SECRET_SECRET_ARN>": env.get("CMS_API_SECRET_SECRET_ARN", ""),
