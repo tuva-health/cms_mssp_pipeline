@@ -67,6 +67,7 @@ scripts/run-client-process-task.sh <client> --database <db> --schema RAW_DATA
 
 Conventions:
 - `scripts/build-and-push-image.sh` derives Docker `PIP_EXTRAS` from `MSSP_OUTPUT_TYPE` (e.g. `processing,snowflake` for Snowflake).
+- `scripts/build-image.sh` is the one image build recipe: `build-and-push-image.sh` calls it with `--push`, and `.github/workflows/release.yml` calls it without, on a `v*` tag, to record its digests (Tuva's reproducibility check). Keep build changes there, and keep the build reproducible: `SOURCE_DATE_EPOCH`, `rewrite-timestamp`, no attestations, and no files in the image that record build times (see `docs/ci.md`, *Reproducibility*).
 - Images are immutable: `scripts/build-and-push-image.sh` pushes an immutable release tag and records the `repository@sha256` digest in `release-metadata/<release-id>.json`; `scripts/deploy-client.sh render-taskdefs` requires that digest as `PIPELINE_IMAGE` (no mutable `:tag`).
 - Revisions are exact: `register-taskdefs` records each registered task-definition ARN in `<overlay>/rendered/task-definition-arns.json`, and `activate` binds the recorded `mssp-pipeline-runtime` revision (never a "latest" family lookup).
 - `scripts/deploy-and-smoke-client.sh` wraps build/push + render/register/activate + a one-off `aws ecs run-task` smoke execution against the recorded runtime revision; the built release's digest is handed to the deploy as `PIPELINE_IMAGE`.

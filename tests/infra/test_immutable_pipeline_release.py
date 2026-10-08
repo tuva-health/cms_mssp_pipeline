@@ -108,16 +108,40 @@ def test_gitleaks_extends_the_default_ruleset() -> None:
 
 
 def test_build_script_hardens_provenance_and_immutability() -> None:
-    build = read("scripts/build-and-push-image.sh")
+    # scripts/build-image.sh is the one build recipe; the ECR push wrapper and
+    # the tag-triggered release workflow both call it.
+    build = read("scripts/build-image.sh")
     assert "clean checkout" in build.lower()
     assert "shasum -a 256 -c release/cms-binaries.sha256" in build
-    for argument in ("SOURCE_COMMIT", "RELEASE_ID", "DEPENDENCY_CHECKSUM"):
+    for argument in ("SOURCE_COMMIT", "RELEASE_ID", "DEPENDENCY_CHECKSUM", "SOURCE_DATE_EPOCH"):
         assert f'--build-arg "{argument}=' in build
-    assert "imageTagMutability" in build
-    assert "aws ecr describe-images" in build
+    assert "--platform linux/amd64" in build
+    # Reproducible digests: no timestamped attestations, layer times clamped.
+    assert "--provenance=false" in build
+    assert "--sbom=false" in build
+    assert "rewrite-timestamp=true" in build
     assert "Refusing mutable image reference" in build
+
+    push = read("scripts/build-and-push-image.sh")
+    assert 'scripts/build-image.sh" "$REPOSITORY" "$RELEASE_ID"' in push
+    assert "--push" in push
+    assert "docker buildx build" not in push, "the push wrapper must not fork the build"
+    assert "imageTagMutability" in push
+    assert "aws ecr describe-images" in push
+    assert '"$DIGEST" != "$BUILT_DIGEST"' in push
     # No mutable-tag discovery.
-    assert "latest_taskdef_arn" not in build
+    assert "latest_taskdef_arn" not in push
+
+
+def test_release_workflow_builds_without_publishing() -> None:
+    workflow = read(".github/workflows/release.yml")
+    assert "scripts/build-image.sh mssp-pipeline" in workflow
+    assert "--push" not in workflow
+    assert "scripts/verify_release_metadata.py" in workflow
+    assert "--prerelease" in workflow
+    # No registry login of any kind: the release publishes digests, not images.
+    for registry_step in ("docker/login-action", "aws-actions/", "ghcr.io", "packages: write"):
+        assert registry_step not in workflow
 
 
 def _write_metadata(path: Path, **overrides: object) -> Path:
@@ -187,3 +211,53 @@ def test_verifier_cross_checks_the_checkout(tmp_path: Path) -> None:
     bad = _run_verifier(str(wrong), "--repo", str(ROOT))
     assert bad.returncode == 1
     assert "head" in bad.stderr.lower()
+
+
+NOTES = ROOT / "scripts" / "release_notes.py"
+
+
+def _record(directory: Path, variant: str, config: str, manifest: str) -> None:
+    record = {
+        "image": "mssp-pipeline@sha256:" + manifest * 64,
+        "manifest_digest": "sha256:" + manifest * 64,
+        "config_digest": "sha256:" + config * 64,
+        "source_commit": "b" * 40,
+        "release_id": "v0.2.0",
+        "dependency_checksum": "c" * 64,
+        "pip_extras": "processing",
+        "source_date_epoch": 1,
+        "platform": "linux/amd64",
+    }
+    (directory / f"build-record-v0.2.0-{variant}.json").write_text(json.dumps(record))
+
+
+def _notes(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(NOTES), *args], text=True, capture_output=True, check=False
+    )
+
+
+def test_release_notes_require_a_changelog_section() -> None:
+    assert _notes("changelog", "0.2.0").returncode == 0
+    assert _notes("changelog", "99.0.0").returncode != 0
+
+
+def test_release_notes_name_the_contract_and_refuse_an_unreproduced_digest(
+    tmp_path: Path,
+) -> None:
+    _record(tmp_path, "parquet", "1", "2")
+    _record(tmp_path, "parquet-rebuild", "1", "2")
+    matched = _notes("notes", "--tag", "v0.2.0", "--records", str(tmp_path), "--require-match")
+    assert matched.returncode == 0, matched.stderr
+    assert "cms-mssp-workbook-export" in matched.stdout
+    assert "sha256:" + "1" * 64 in matched.stdout
+    assert "## Changelog" in matched.stdout
+    # Digests are Tuva's reproducibility record; clients adopt via the consumption doc.
+    assert "blob/v0.2.0/docs/client-release-consumption.md" in matched.stdout
+    assert "conformance check" in matched.stdout
+    assert "build your own" not in matched.stdout
+
+    _record(tmp_path, "parquet-rebuild", "3", "2")
+    drifted = _notes("notes", "--tag", "v0.2.0", "--records", str(tmp_path), "--require-match")
+    assert drifted.returncode == 3
+    assert "**differ**" in drifted.stdout

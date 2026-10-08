@@ -1,0 +1,223 @@
+# Release gate for the canonical pipeline repository.
+#
+# On a `v*` tag: prove the tag is releasable (on main, matches pyproject.toml,
+# has a CHANGELOG entry), build the runtime image for every backend variant with
+# scripts/build-image.sh, rebuild the default variant on a second runner to check
+# the build reproduces, and create a GitHub pre-release carrying the CHANGELOG
+# section, the workbook contract version, the expected image digests and the
+# release metadata.
+#
+# The image is NOT pushed to any registry and no registry credential is used.
+# Clients build their own image (extras vary by MSSP_OUTPUT_TYPE); the release
+# publishes the digests their build of the same tag should reproduce. The only
+# write is the GitHub Release, made with this workflow's GITHUB_TOKEN.
+#
+# Anything other than a tag push is a dry run: everything above except creating
+# the Release (the notes and assets go to the job summary and a workflow
+# artifact instead). That covers workflow_dispatch and pull requests that touch
+# the release machinery, so a change to it is rehearsed before it merges.
+# See docs/ci.md.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/release.yml
+      - Dockerfile
+      - scripts/build-image.sh
+      - scripts/release_notes.py
+      - scripts/verify_release_metadata.py
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to rehearse (default: v<pyproject version>). Dry run only; nothing is published."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  # Never cancel a tag release; a newer push to a PR supersedes its rehearsal.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      dry_run: ${{ steps.tag.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Resolve the tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            tag="$GITHUB_REF_NAME"
+            dry_run=false
+          else
+            tag="${INPUT_TAG:-v$version}"
+            dry_run=true
+          fi
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::$tag is not a semver tag (vX.Y.Z)"
+            exit 1
+          fi
+          if [[ "${tag#v}" != "$version" ]]; then
+            echo "::error::tag $tag does not match pyproject.toml version $version"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "dry_run=$dry_run" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag version=$version dry_run=$dry_run commit=$GITHUB_SHA"
+
+      - name: Check the commit is on main
+        env:
+          DRY_RUN: ${{ steps.tag.outputs.dry_run }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          if git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "$GITHUB_SHA is on main"
+          elif [[ "$DRY_RUN" == "true" ]]; then
+            echo "::warning::$GITHUB_SHA is not on main; a real tag here would be refused"
+          else
+            echo "::error::tagged commit $GITHUB_SHA is not on main"
+            exit 1
+          fi
+
+      - name: Check the CHANGELOG has a section for the version
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          python3 scripts/release_notes.py changelog "${TAG#v}"
+
+  build:
+    name: build (${{ matrix.output_type }}${{ matrix.rebuild && ', rebuild' || '' }})
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: true
+      matrix:
+        # One entry per distinct extras set scripts/build-image.sh derives.
+        # PARQUET also covers DUCKDB and MOTHERDUCK (same extras).
+        output_type: [PARQUET, SNOWFLAKE, DATABRICKS, BIGQUERY, REDSHIFT, FABRIC]
+        rebuild: [false]
+        include:
+          # A second, independent build of the default variant on a fresh
+          # runner with no shared cache: the reproducibility check.
+          - output_type: PARQUET
+            rebuild: true
+    env:
+      TAG: ${{ needs.verify.outputs.tag }}
+      MSSP_OUTPUT_TYPE: ${{ matrix.output_type }}
+      VARIANT: ${{ matrix.output_type }}${{ matrix.rebuild && '-rebuild' || '' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build the image (no push, no cache)
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/out"
+          variant="$(echo "$VARIANT" | tr '[:upper:]' '[:lower:]')"
+          scripts/build-image.sh mssp-pipeline "$TAG" \
+            --metadata "$out/release-metadata-$TAG-$variant.json" \
+            --record "$out/build-record-$TAG-$variant.json"
+          echo "OUT=$out" >> "$GITHUB_ENV"
+
+      - name: Verify the release metadata against the checkout
+        run: |
+          set -euo pipefail
+          for metadata in "$OUT"/release-metadata-*.json; do
+            python3 scripts/verify_release_metadata.py "$metadata" --repo .
+          done
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: build-${{ env.VARIANT }}
+          path: ${{ env.OUT }}
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: release
+    needs: [verify, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.verify.outputs.tag }}
+      DRY_RUN: ${{ needs.verify.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: build-*
+          path: ${{ runner.temp }}/builds
+          merge-multiple: true
+
+      - name: Assemble the release notes and assets
+        run: |
+          set -euo pipefail
+          builds="$RUNNER_TEMP/builds"
+          assets="$RUNNER_TEMP/assets"
+          mkdir -p "$assets"
+          # Release metadata for every variant; the rebuild's is evidence only.
+          for metadata in "$builds"/release-metadata-"$TAG"-*.json; do
+            case "$metadata" in *-rebuild.json) continue ;; esac
+            cp "$metadata" "$assets/"
+          done
+          # --require-match: a digest the rebuild could not reproduce is not
+          # worth publishing, so a mismatch fails the run (after the summary).
+          status=0
+          python3 scripts/release_notes.py notes \
+            --tag "$TAG" \
+            --records "$builds" \
+            --digests-out "$assets/image-digests-$TAG.json" \
+            --require-match \
+            > "$RUNNER_TEMP/notes.md" || status=$?
+          ls -l "$assets"
+          cat "$RUNNER_TEMP/notes.md" >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - name: Upload the rehearsed release (dry run)
+        if: env.DRY_RUN == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-dry-run-${{ env.TAG }}
+          path: |
+            ${{ runner.temp }}/notes.md
+            ${{ runner.temp }}/assets
+          retention-days: 14
+
+      - name: Create the GitHub pre-release
+        if: env.DRY_RUN != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            --verify-tag \
+            --prerelease \
+            --title "$TAG" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            "$RUNNER_TEMP"/assets/*

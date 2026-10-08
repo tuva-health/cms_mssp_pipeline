@@ -94,7 +94,7 @@ uv run mssp-validate --target pipeline
 - `infra/terraform/aws/README.md` — Terraform skeleton usage for Foundation + Activate
 - `infra/clients/client.example/` — per-client overlay examples (`env.sh`, `*.tfvars`)
 - `scripts/check-client-config.sh` — validates AWS auth, required vars, and per-client tfvars before deploy
-- `scripts/build-and-push-image.sh` — builds and pushes an immutable linux/amd64 release to ECR for a client context and records its `repository@sha256` digest in `release-metadata/<release-id>.json`; automatically installs backend extras based on `MSSP_OUTPUT_TYPE` (override with `PIP_EXTRAS`)
+- `scripts/build-and-push-image.sh` — builds and pushes an immutable linux/amd64 release to ECR for a client context and records its `repository@sha256` digest in `release-metadata/<release-id>.json`; automatically installs backend extras based on `MSSP_OUTPUT_TYPE` (override with `PIP_EXTRAS`). The build itself is `scripts/build-image.sh`, which the release workflow also uses (see [Releases](#releases))
 - `scripts/deploy-client.sh` — wrapper to validate + apply foundation/activate and render/register ECS taskdefs; `render-taskdefs` requires the digest as `PIPELINE_IMAGE`, `register-taskdefs` records exact revision ARNs, and `activate` binds the recorded `mssp-pipeline-runtime` revision
 - `scripts/deploy-and-smoke-client.sh` / `scripts/run-client-process-task.sh` — one-command build + deploy + one-off ECS run against the recorded runtime revision (see `AGENTS.md`)
 
@@ -486,7 +486,31 @@ Pull requests to `main` must pass the CI workflow (`test`, `lock`, `terraform`, 
 
 ## Releases
 
-Releases are semver tags `vX.Y.Z` on `main`. Each one has an entry in [`CHANGELOG.md`](CHANGELOG.md) and a GitHub Release carrying the immutable image digest and the release metadata produced by `scripts/build-and-push-image.sh`. A release stays marked pre-release until a client deployment has validated it end to end.
+Releases are semver tags `vX.Y.Z` on `main`. Pushing the tag runs `.github/workflows/release.yml`, which creates a GitHub Release marked **pre-release** carrying the CHANGELOG section, the workbook contract version (`contracts/workbook/v1.json`), the recorded image digests, and the release metadata. A release stays a pre-release until a client deployment has validated it end to end.
+
+**No image is published.** Each client builds its own image (the extras depend on `MSSP_OUTPUT_TYPE`) and pushes it to its own registry with `scripts/build-and-push-image.sh`. The release's job is to prove the tag builds and reproduces.
+
+### Cutting a release
+
+1. On a branch, bump `version` in `pyproject.toml` and move the `[Unreleased]` CHANGELOG entries under `## [X.Y.Z] - <date>`; land it on `main` through a PR.
+2. Tag the merge commit on `main` and push the tag:
+
+   ```bash
+   git fetch origin && git tag -a vX.Y.Z origin/main -m "vX.Y.Z" && git push origin vX.Y.Z
+   ```
+
+3. The workflow refuses the tag unless the commit is on `main`, the tag equals `v` + the `pyproject.toml` version, and CHANGELOG has a non-empty section for it. It then builds every backend variant with `scripts/build-image.sh` (`linux/amd64`, no push, no cache), rebuilds `PARQUET` on a second runner, and fails if the two builds' digests differ. Only then does it create the pre-release.
+
+To rehearse without publishing, run the workflow from the Actions tab (`workflow_dispatch`): it does everything except create the Release, and leaves the notes and assets in the run summary and a `release-dry-run-<tag>` artifact. A pull request that touches the release machinery (`release.yml`, `Dockerfile`, `scripts/build-image.sh`, `scripts/release_notes.py`, `scripts/verify_release_metadata.py`) runs the same rehearsal.
+
+Release assets:
+
+- `release-metadata-<tag>-<output type>.json`: the provenance contract `scripts/verify_release_metadata.py` checks, one per variant. Its `image` (`mssp-pipeline@sha256:…`) names the unpublished CI build; deploy from the metadata your own `scripts/build-and-push-image.sh` run writes.
+- `image-digests-<tag>.json`: every variant's config digest (image ID) and manifest digest, the source commit, `SOURCE_DATE_EPOCH`, and the rebuild check.
+
+### Release digests
+
+The recorded digests are Tuva's internal reproducibility guarantee: every release rebuilds a variant on a second runner and fails if the digests differ. Clients do not rebuild the tag or compare digests; a client fork proves it carries a release with a git conformance check, as described in [`docs/client-release-consumption.md`](docs/client-release-consumption.md).
 
 ---
 

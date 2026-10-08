@@ -14,6 +14,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the workbook contract, with the staged plan driven through the sequencer and
   a fake ECS client; injected exporter and gate faults must be caught
   (TUVA-70). See `docs/ci.md`.
+- Tag-triggered release workflow (`.github/workflows/release.yml`, TUVA-68).
+  A `v*` tag on `main` whose version matches `pyproject.toml` and has a
+  CHANGELOG section is built for every backend variant, the default variant is
+  rebuilt on a second runner and must reproduce the same digests, and a GitHub
+  pre-release is created with the CHANGELOG section, the workbook contract
+  version, the recorded config and manifest digests per `MSSP_OUTPUT_TYPE`, and
+  the release metadata. No image is pushed anywhere; clients build their own.
+  The digests are Tuva's reproducibility record, not a client check (README,
+  *Releases*). Any trigger other than a tag push is a dry run.
+
+### Changed
+
+- The image build moved from `scripts/build-and-push-image.sh` into
+  `scripts/build-image.sh`, which the push script and the release workflow both
+  call. Builds now set `SOURCE_DATE_EPOCH` to the commit time, rewrite layer
+  timestamps to it, and turn off provenance and SBOM attestations, so the pushed
+  image is a single manifest rather than an index with attestations.
+  `build-and-push-image.sh` fails if the digest ECR reports differs from the one
+  buildx pushed. Needs BuildKit 0.13 or newer.
+- The Dockerfile drops files that record install times (apt and dpkg logs, the
+  ldconfig cache, uv's cache, the project's `uv_cache.json`). The image no
+  longer carries a uv cache under `/root/.cache/uv`.
 
 ## [0.2.0] - 2026-09-04
 

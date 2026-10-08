@@ -93,6 +93,77 @@ locally, leave it unset rather than exporting `AWS_PROFILE=`.
   `terraform plan`/`apply` against a remote backend. Those run from the client
   repositories, which carry the account, bucket, and credential configuration
   this repository must not.
-- Release builds. `scripts/build-and-push-image.sh` remains the only path that
-  produces a tagged, digest-recorded image.
+- Release builds. `ci.yml` never runs `scripts/build-image.sh`; the release
+  workflow below does.
 - Multi-architecture images. The runtime target is `linux/amd64` only.
+
+# Release workflow
+
+`.github/workflows/release.yml` runs on a pushed `v*` tag. It uses only the
+workflow's `GITHUB_TOKEN`, and its one write is the GitHub Release; no image is
+pushed and no registry credential exists. How to cut a release is in the README
+(*Releases*). The recorded digests are Tuva's reproducibility check, not a
+client target: clients adopt a release by the git conformance check in
+`docs/client-release-consumption.md`.
+
+| Job | What it does |
+| --- | --- |
+| `verify` | The tag is semver, equals `v` + the `pyproject.toml` version, its commit is an ancestor of `origin/main`, and `CHANGELOG.md` has a non-empty section for the version (`scripts/release_notes.py changelog`). |
+| `build (<type>)` | `scripts/build-image.sh mssp-pipeline <tag>` for each `MSSP_OUTPUT_TYPE` with a distinct extras set (PARQUET, SNOWFLAKE, DATABRICKS, BIGQUERY, REDSHIFT, FABRIC) on a fresh docker-container builder with no cache, then `scripts/verify_release_metadata.py --repo .` on the metadata it wrote. |
+| `build (PARQUET, rebuild)` | The same build again on another runner: the reproducibility check. |
+| `release` | `scripts/release_notes.py notes --require-match` assembles the body (CHANGELOG section, workbook contract name, version and sha256, digest table, rebuild verdict). It fails when the rebuild's digests differ. On a tag push it then runs `gh release create --verify-tag --prerelease` with the metadata files and `image-digests-<tag>.json` attached. |
+
+Any other trigger is a dry run: the `release` job writes the notes to the job
+summary and uploads them with the assets as `release-dry-run-<tag>` instead of
+creating a Release. The commit-on-`main` check is a warning, not an error. Dry
+runs come from `workflow_dispatch` (optional `tag` input, default
+`v<pyproject version>`) and from pull requests that change `release.yml`,
+`Dockerfile`, `scripts/build-image.sh`, `scripts/release_notes.py`, or
+`scripts/verify_release_metadata.py`. On a pull request the built commit is the
+merge commit, so the digests differ from the ones the tag will produce.
+
+Running a build by hand reproduces a `build` job exactly:
+
+```bash
+docker buildx create --use --name mssp-repro
+MSSP_OUTPUT_TYPE=PARQUET scripts/build-image.sh mssp-pipeline v0.2.0 \
+  --metadata /tmp/meta.json --record /tmp/record.json
+python3 scripts/verify_release_metadata.py /tmp/meta.json --repo .
+```
+
+## Reproducibility
+
+Maintainer notes: why two builds of one commit produce identical digests, and
+what can still make them differ. The `build (PARQUET, rebuild)` job enforces
+this on every release.
+
+What makes the build reproducible:
+
+- The base image is pinned by digest, and Python dependencies install frozen
+  from `uv.lock`.
+- `SOURCE_DATE_EPOCH` is the commit time of `HEAD`. Image and layer timestamps
+  are clamped to it (`rewrite-timestamp`), and `.pyc` files use hash-based
+  invalidation.
+- Provenance and SBOM attestations are off; they embed build times.
+- The Dockerfile removes files that record install times: apt and dpkg logs,
+  the ldconfig cache, uv's cache, and the project's `uv_cache.json`.
+
+Two independent CI builds of the same commit produce identical config and
+manifest digests. The config digest is the image ID (a hash of the image
+configuration and uncompressed layers), so it does not depend on layer
+compression. The manifest digest also matches only when layers are compressed
+the same way: a docker-container builder on a recent BuildKit, as in CI. The
+default `docker` driver can produce a different manifest digest for the same
+config digest.
+
+What can still make a later build differ:
+
+- The apt packages (`ca-certificates`, `expect`) come from the live Debian
+  archive, not a snapshot. A Debian security or point release between the tag
+  and a rebuild changes that layer and every digest after it. If the config
+  digest differs, compare layers (for example with `diffoci`) before suspecting
+  the source.
+- BuildKit older than 0.13 ignores `rewrite-timestamp`, and then every digest
+  differs.
+- The release id is a build argument baked into the image, so a rebuild must
+  use the tag itself (`vX.Y.Z`) as the release id.
