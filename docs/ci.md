@@ -22,6 +22,45 @@ one only together with the protection rule.
 | `shell` | `shellcheck scripts/*.sh docker/*.sh` at the default severity. |
 | `image` | `docker build` for `linux/amd64` with the same build arguments `scripts/build-and-push-image.sh` passes (`SOURCE_COMMIT`, `RELEASE_ID`, `DEPENDENCY_CHECKSUM`, `PIP_EXTRAS=processing,snowflake`). Proves the digest-pinned base image resolves, the frozen install succeeds, and the bundled CMS binaries match `release/cms-binaries.sha256`. The image is never pushed or loaded; layers are cached in the GitHub Actions cache. |
 
+## Synthetic end-to-end job (`e2e`, not required)
+
+`e2e` runs `tests/e2e/synthetic_run.py`: it writes a synthetic CMS delivery
+(the openpyxl BNMRK / AEXPU / QEXPU workbook fixtures plus one small
+fixed-width file per CCLF type, all fake values) and drives a three-stage plan
+through the real sequencer engine with the in-memory lease store, a synthetic
+readiness source and a fake ECS client whose tasks run locally:
+
+| Stage | Task | Gate after it |
+| --- | --- | --- |
+| `process` | the real `mssp-process` with `MSSP_OUTPUT_TYPE=PARQUET` | readiness (`bootstrap`, `whitelist`), exact image digest + task revision before launch |
+| `load` | every Parquet output loaded into a local DuckDB (`raw_data`) | output contract: the twenty relations of `contracts/workbook/v1.json`, read through `InformationSchemaOutputSource` |
+| `conformance` | every contracted table checked column-for-column and type-for-type against the contract; CCLF row counts | task exit code |
+
+The clean run must pass; then each injected fault must halt the sequence at
+the stage and gate that should catch it (the job fails if a fault slips
+through):
+
+| `--fault` | Defect | Caught at |
+| --- | --- | --- |
+| `uppercase-columns` | exporter skips the lowercase column normalisation | `conformance` / task |
+| `missing-table` | exporter silently drops `bnmrk_table_1` | `load` / output-contract |
+| `readiness-blocked` | `whitelist` gate reads `false` | `process` / readiness |
+| `lease-held` | another run holds the lease | `process` / lease |
+| `image-drift` | a family resolves to a different digest than the plan pins | `load` / image-identity |
+
+It is deliberately **not** a required check while it beds in; add it to branch
+protection only together with the rule. Run it locally exactly as CI does:
+
+```bash
+uv run --frozen python -m tests.e2e.synthetic_run --workdir /tmp/mssp-e2e
+uv run --frozen python -m tests.e2e.synthetic_run --workdir /tmp/mssp-e2e --fault missing-table
+```
+
+Not covered: the download subsystem (`acoms-cli`), MSSP CSV / MCQM / BNEX
+deliveries, cloud exporters, the container image, and real ECS/SSM/DynamoDB --
+the ECS client, lease store and readiness source are the same fakes the unit
+tests use.
+
 Tool versions are read from the files that already pin them: `uv` from the
 Dockerfile's `UV_VERSION` argument and Terraform from `.terraform-version`.
 

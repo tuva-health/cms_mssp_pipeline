@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Synthetic end-to-end CI job (`e2e`, not a required check): a fake CMS
+  delivery runs through `mssp-process` (Parquet) into DuckDB, checked against
+  the workbook contract, with the staged plan driven through the sequencer and
+  a fake ECS client; injected exporter and gate faults must be caught
+  (TUVA-70). See `docs/ci.md`.
+
 ## [0.2.0] - 2026-09-04
 
 First formal release of the converged baseline. Validated end to end in a
