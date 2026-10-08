@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-08
+
 ### Added
 
 - Synthetic end-to-end CI job (`e2e`, not a required check): a fake CMS
@@ -167,5 +169,6 @@ client dev and prod deployment on 2026-09-03/04.
   image, so the in-container verification no longer fails on the excluded
   macOS binary.
 
-[Unreleased]: https://github.com/tuva-health/cms_mssp_pipeline/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/tuva-health/cms_mssp_pipeline/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/tuva-health/cms_mssp_pipeline/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/tuva-health/cms_mssp_pipeline/releases/tag/v0.2.0

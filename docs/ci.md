@@ -126,7 +126,7 @@ Running a build by hand reproduces a `build` job exactly:
 
 ```bash
 docker buildx create --use --name mssp-repro
-MSSP_OUTPUT_TYPE=PARQUET scripts/build-image.sh mssp-pipeline v0.2.0 \
+MSSP_OUTPUT_TYPE=PARQUET scripts/build-image.sh mssp-pipeline v0.3.0 \
   --metadata /tmp/meta.json --record /tmp/record.json
 python3 scripts/verify_release_metadata.py /tmp/meta.json --repo .
 ```
