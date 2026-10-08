@@ -19,7 +19,8 @@ Tuva's internal guarantee that a tag builds reproducibly (TUVA-68); clients do
 not rebuild the tag or compare digests.
 
 The connector's README (*Consuming a release in a client fork*) covers the
-connector's own check and its client-specific paths.
+connector's own check (`scripts/check_release_conformance.sh`, the same rules
+with the connector's client-specific paths).
 
 ## Summary
 
@@ -160,7 +161,7 @@ Use this template. Fill in every line, or write why a line does not apply.
   ```
   <paste the full output, PASS line included>
   ```
-- Connector conformance (`scripts/check-release-conformance.sh vA.B.C <commit>` in the connector fork):
+- Connector conformance (`scripts/check_release_conformance.sh vA.B.C <commit>` in the connector fork):
   ```
   <paste the full output, PASS line included>
   ```
