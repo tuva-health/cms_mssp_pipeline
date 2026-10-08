@@ -25,6 +25,11 @@ ARG SOURCE_COMMIT=unknown
 ARG RELEASE_ID=unknown
 ARG DEPENDENCY_CHECKSUM=unknown
 
+# Commit time of the source, supplied by scripts/build-image.sh. BuildKit uses it
+# to clamp image and layer timestamps; declaring it also exposes it to RUN, so
+# the .pyc files pip writes use hash-based invalidation instead of mtimes.
+ARG SOURCE_DATE_EPOCH
+
 # Which optional dependency groups to install into the image. The set of backends
 # is a client build choice; the *frozen* install is the generic guarantee.
 ARG PIP_EXTRAS=processing

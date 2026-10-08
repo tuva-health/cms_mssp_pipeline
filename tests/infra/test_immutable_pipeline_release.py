@@ -108,16 +108,40 @@ def test_gitleaks_extends_the_default_ruleset() -> None:
 
 
 def test_build_script_hardens_provenance_and_immutability() -> None:
-    build = read("scripts/build-and-push-image.sh")
+    # scripts/build-image.sh is the one build recipe; the ECR push wrapper and
+    # the tag-triggered release workflow both call it.
+    build = read("scripts/build-image.sh")
     assert "clean checkout" in build.lower()
     assert "shasum -a 256 -c release/cms-binaries.sha256" in build
-    for argument in ("SOURCE_COMMIT", "RELEASE_ID", "DEPENDENCY_CHECKSUM"):
+    for argument in ("SOURCE_COMMIT", "RELEASE_ID", "DEPENDENCY_CHECKSUM", "SOURCE_DATE_EPOCH"):
         assert f'--build-arg "{argument}=' in build
-    assert "imageTagMutability" in build
-    assert "aws ecr describe-images" in build
+    assert "--platform linux/amd64" in build
+    # Reproducible digests: no timestamped attestations, layer times clamped.
+    assert "--provenance=false" in build
+    assert "--sbom=false" in build
+    assert "rewrite-timestamp=true" in build
     assert "Refusing mutable image reference" in build
+
+    push = read("scripts/build-and-push-image.sh")
+    assert 'scripts/build-image.sh" "$REPOSITORY" "$RELEASE_ID"' in push
+    assert "--push" in push
+    assert "docker buildx build" not in push, "the push wrapper must not fork the build"
+    assert "imageTagMutability" in push
+    assert "aws ecr describe-images" in push
+    assert '"$DIGEST" != "$BUILT_DIGEST"' in push
     # No mutable-tag discovery.
-    assert "latest_taskdef_arn" not in build
+    assert "latest_taskdef_arn" not in push
+
+
+def test_release_workflow_builds_without_publishing() -> None:
+    workflow = read(".github/workflows/release.yml")
+    assert "scripts/build-image.sh mssp-pipeline" in workflow
+    assert "--push" not in workflow
+    assert "scripts/verify_release_metadata.py" in workflow
+    assert "--prerelease" in workflow
+    # No registry login of any kind: the release publishes digests, not images.
+    for registry_step in ("docker/login-action", "aws-actions/", "ghcr.io", "packages: write"):
+        assert registry_step not in workflow
 
 
 def _write_metadata(path: Path, **overrides: object) -> Path:
