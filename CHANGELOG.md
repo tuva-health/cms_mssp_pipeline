@@ -19,10 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CHANGELOG section is built for every backend variant, the default variant is
   rebuilt on a second runner and must reproduce the same digests, and a GitHub
   pre-release is created with the CHANGELOG section, the workbook contract
-  version, the expected config and manifest digests per `MSSP_OUTPUT_TYPE`, and
-  the release metadata. No image is pushed anywhere; clients build their own and
-  compare digests (README, *Releases*). Any trigger other than a tag push is a
-  dry run.
+  version, the recorded config and manifest digests per `MSSP_OUTPUT_TYPE`, and
+  the release metadata. No image is pushed anywhere; clients build their own.
+  The digests are Tuva's reproducibility record, not a client check (README,
+  *Releases*). Any trigger other than a tag push is a dry run.
 
 ### Changed
 
