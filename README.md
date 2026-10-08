@@ -90,6 +90,7 @@ uv run mssp-validate --target pipeline
 - `docs/aws-bootstrap-runbook.md` — operator checklist for whitelist + `config.txt` bootstrap
 - `docs/aws-ecs-container-contract.md` — ECS env/secret contract and container behavior
 - `docs/aws-iam-minimum-policies.md` — least-privilege baseline IAM templates
+- `docs/client-release-consumption.md` — how a client fork merges a release tag, proves with `scripts/check-release-conformance.sh` that it carries the release, runs it and reports validation
 - `infra/aws/ecs/taskdef-runtime.json` and `infra/aws/ecs/taskdef-bootstrap.json` — ECS task definition templates (x86_64)
 - `infra/terraform/aws/README.md` — Terraform skeleton usage for Foundation + Activate
 - `infra/clients/client.example/` — per-client overlay examples (`env.sh`, `*.tfvars`)
@@ -489,6 +490,8 @@ Pull requests to `main` must pass the CI workflow (`test`, `lock`, `terraform`, 
 Releases are semver tags `vX.Y.Z` on `main`. Pushing the tag runs `.github/workflows/release.yml`, which creates a GitHub Release marked **pre-release** carrying the CHANGELOG section, the workbook contract version (`contracts/workbook/v1.json`), the recorded image digests, and the release metadata. A release stays a pre-release until a client deployment has validated it end to end.
 
 **No image is published.** Each client builds its own image (the extras depend on `MSSP_OUTPUT_TYPE`) and pushes it to its own registry with `scripts/build-and-push-image.sh`. The release's job is to prove the tag builds and reproduces.
+
+A client fork consumes a release by merging the tag, checking with git that its commit contains the tag and differs from it only in client-specific paths (`scripts/check-release-conformance.sh vX.Y.Z`), deploying its own build of that commit, running its dev sequence, and posting the evidence; the maintainer then promotes the pre-release. Clients do not compare digests: the recorded digests are the release workflow's own reproducibility check. The steps, and what "validated" does and does not mean, are in [`docs/client-release-consumption.md`](docs/client-release-consumption.md).
 
 ### Cutting a release
 
