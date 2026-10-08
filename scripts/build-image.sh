@@ -10,7 +10,7 @@ Builds the linux/amd64 pipeline runtime image from a CLEAN checkout as
 <repository>:<release-id> and records what was built. This is the one build
 recipe: scripts/build-and-push-image.sh calls it with --push for a client
 registry, and .github/workflows/release.yml calls it without --push to prove a
-tag builds and to record the digests a client build should reproduce.
+tag builds and to record its digests (Tuva's reproducibility check).
 
   --push           Push <repository>:<release-id> (the caller logs in first).
                    Without it the image stays in the builder (docker-container
@@ -26,7 +26,7 @@ tag builds and to record the digests a client build should reproduce.
 Reproducibility: SOURCE_DATE_EPOCH is the commit time of HEAD, layer file
 timestamps are rewritten to it, and provenance/SBOM attestations are off, so
 two builds of one commit with the same extras can produce the same digests.
-See the README "Releases" section for what is and is not reproducible.
+See docs/ci.md ("Reproducibility") for what is and is not reproducible.
 
 Environment:
   MSSP_OUTPUT_TYPE  Derives the Python extras to bake in (default PARQUET).

@@ -252,6 +252,10 @@ def test_release_notes_name_the_contract_and_refuse_an_unreproduced_digest(
     assert "cms-mssp-workbook-export" in matched.stdout
     assert "sha256:" + "1" * 64 in matched.stdout
     assert "## Changelog" in matched.stdout
+    # Digests are Tuva's reproducibility record; clients adopt via the consumption doc.
+    assert "blob/v0.2.0/docs/client-release-consumption.md" in matched.stdout
+    assert "conformance check" in matched.stdout
+    assert "build your own" not in matched.stdout
 
     _record(tmp_path, "parquet-rebuild", "3", "2")
     drifted = _notes("notes", "--tag", "v0.2.0", "--records", str(tmp_path), "--require-match")

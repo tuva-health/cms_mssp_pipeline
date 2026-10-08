@@ -29,6 +29,10 @@ ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = Path("contracts/workbook/v1.json")
 # Output types sharing one extras set, as scripts/build-image.sh derives them.
 ALIASES = {"PARQUET": "PARQUET / DUCKDB / MOTHERDUCK"}
+# Client-facing adoption path, pinned to the released tag.
+CONSUMPTION_DOC_URL = (
+    "https://github.com/tuva-health/cms_mssp_pipeline/blob/{tag}/docs/client-release-consumption.md"
+)
 
 
 def changelog_section(version: str) -> str:
@@ -108,13 +112,16 @@ def render(tag: str, variants: list[dict], check: dict | None, contract: dict) -
         f"- **Dependency checksum (uv.lock sha256):** `{variants[0]['dependency_checksum']}`",
         f"- **SOURCE_DATE_EPOCH:** `{variants[0]['source_date_epoch']}` (commit time)",
         "",
-        "## Expected image digests",
+        "## Recorded image digests",
         "",
         "Built in CI by `scripts/build-image.sh` for `linux/amd64`. **No image is "
-        "published**: build your own from this tag and compare (see README, "
-        "*Releases*). The config digest is the image ID and does not depend on "
-        "layer compression; the manifest digest is what a registry would report "
-        "for an image pushed by `scripts/build-image.sh --push`.",
+        "published.** These digests are recorded for Tuva's reproducibility "
+        "check (below); they are not a target for a client build. To adopt this "
+        "release, follow the consumption doc, "
+        f"[`docs/client-release-consumption.md`]({CONSUMPTION_DOC_URL.format(tag=tag)}), "
+        "and run its git conformance check. The config digest is the image ID and "
+        "does not depend on layer compression; the manifest digest is what a "
+        "registry would report for an image pushed by `scripts/build-image.sh --push`.",
         "",
         "| MSSP_OUTPUT_TYPE | PIP_EXTRAS | config digest (image ID) | manifest digest |",
         "| --- | --- | --- | --- |",
@@ -137,8 +144,8 @@ def render(tag: str, variants: list[dict], check: dict | None, contract: dict) -
         )
         if check["config_digest_match"] and check["manifest_digest_match"]:
             out.append(
-                "A clean checkout of this tag built with `scripts/build-image.sh` and "
-                "the same `MSSP_OUTPUT_TYPE` should reproduce the digests above."
+                "The tag reproduces: a clean checkout built with `scripts/build-image.sh` "
+                "and the same `MSSP_OUTPUT_TYPE` yields the digests above."
             )
         else:
             out.append(

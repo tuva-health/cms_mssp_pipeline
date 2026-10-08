@@ -101,8 +101,10 @@ locally, leave it unset rather than exporting `AWS_PROFILE=`.
 
 `.github/workflows/release.yml` runs on a pushed `v*` tag. It uses only the
 workflow's `GITHUB_TOKEN`, and its one write is the GitHub Release; no image is
-pushed and no registry credential exists. How to cut a release and how a client
-compares its build are in the README (*Releases*).
+pushed and no registry credential exists. How to cut a release is in the README
+(*Releases*). The recorded digests are Tuva's reproducibility check, not a
+client target: clients adopt a release by the git conformance check in
+`docs/client-release-consumption.md`.
 
 | Job | What it does |
 | --- | --- |
@@ -128,3 +130,40 @@ MSSP_OUTPUT_TYPE=PARQUET scripts/build-image.sh mssp-pipeline v0.2.0 \
   --metadata /tmp/meta.json --record /tmp/record.json
 python3 scripts/verify_release_metadata.py /tmp/meta.json --repo .
 ```
+
+## Reproducibility
+
+Maintainer notes: why two builds of one commit produce identical digests, and
+what can still make them differ. The `build (PARQUET, rebuild)` job enforces
+this on every release.
+
+What makes the build reproducible:
+
+- The base image is pinned by digest, and Python dependencies install frozen
+  from `uv.lock`.
+- `SOURCE_DATE_EPOCH` is the commit time of `HEAD`. Image and layer timestamps
+  are clamped to it (`rewrite-timestamp`), and `.pyc` files use hash-based
+  invalidation.
+- Provenance and SBOM attestations are off; they embed build times.
+- The Dockerfile removes files that record install times: apt and dpkg logs,
+  the ldconfig cache, uv's cache, and the project's `uv_cache.json`.
+
+Two independent CI builds of the same commit produce identical config and
+manifest digests. The config digest is the image ID (a hash of the image
+configuration and uncompressed layers), so it does not depend on layer
+compression. The manifest digest also matches only when layers are compressed
+the same way: a docker-container builder on a recent BuildKit, as in CI. The
+default `docker` driver can produce a different manifest digest for the same
+config digest.
+
+What can still make a later build differ:
+
+- The apt packages (`ca-certificates`, `expect`) come from the live Debian
+  archive, not a snapshot. A Debian security or point release between the tag
+  and a rebuild changes that layer and every digest after it. If the config
+  digest differs, compare layers (for example with `diffoci`) before suspecting
+  the source.
+- BuildKit older than 0.13 ignores `rewrite-timestamp`, and then every digest
+  differs.
+- The release id is a build argument baked into the image, so a rebuild must
+  use the tag itself (`vX.Y.Z`) as the release id.
