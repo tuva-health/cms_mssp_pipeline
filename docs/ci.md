@@ -7,8 +7,12 @@ same ref cancels the older one.
 
 ## Required checks
 
-Branch protection on `main` requires these five jobs. The names are stable;
-rename one only together with the protection rule.
+Changes land on `main` only through a pull request. Branch protection on
+`main` requires these five jobs to pass on a branch that is up to date with
+`main`; it requires no approvals, blocks force-pushes and deletion, applies to
+admins, and allows merge commits and squash merges (not rebase merges). Jobs
+not listed here run but do not gate the merge. The names are stable; rename
+one only together with the protection rule.
 
 | Job | What it proves |
 | --- | --- |

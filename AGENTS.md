@@ -87,6 +87,13 @@ uv run pytest tests/processing/ -v
 - **Mock `acoms-cli`** subprocess calls — never call the real binary in tests.
 - **Use PARQUET/DUCKDB output** for local development — avoid cloud backends.
 
+## Landing changes on `main`
+
+- Work reaches `main` only through a pull request whose required checks are green and whose branch is up to date with `main`. No direct pushes, force-pushes, or branch deletion.
+- Required checks (job names in `.github/workflows/ci.yml`): `test`, `lock`, `terraform`, `shell`, `image`. Other jobs (e.g. `e2e`) run but do not gate the merge.
+- Merge with a merge commit or squash; rebase-merge is off. No approval count is required.
+- Job names are what protection matches on — rename one only together with the protection rule. Details: `docs/ci.md`.
+
 ## Binary
 
 | Platform | Path |
