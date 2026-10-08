@@ -65,6 +65,47 @@ jobs:
             echo "::endgroup::"
           done
 
+  e2e:
+    # Synthetic end-to-end run (TUVA-70). Not a required check: see docs/ci.md.
+    name: e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      AWS_EC2_METADATA_DISABLED: "true"
+      # The runtime image's interpreter (python:3.11-slim).
+      UV_PYTHON: "3.11"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Read the pinned uv version from the Dockerfile
+        id: uv
+        run: |
+          version="$(sed -n 's/^ARG UV_VERSION=//p' Dockerfile)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ steps.uv.outputs.version }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install
+        run: uv sync --frozen
+
+      - name: Synthetic delivery -> mssp-process (PARQUET) -> DuckDB -> workbook contract
+        # A clean run must pass every sequencer gate; each injected fault must
+        # halt the sequence at the stage and gate that should catch it.
+        run: |
+          set -euo pipefail
+          unset AWS_PROFILE
+          for fault in "" uppercase-columns missing-table readiness-blocked lease-held image-drift; do
+            echo "::group::e2e ${fault:-clean}"
+            uv run --frozen python -m tests.e2e.synthetic_run \
+              --workdir "$RUNNER_TEMP/e2e" ${fault:+--fault "$fault"}
+            echo "::endgroup::"
+          done
+
   lock:
     name: lock
     runs-on: ubuntu-latest
