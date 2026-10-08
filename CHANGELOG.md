@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the release metadata. No image is pushed anywhere; clients build their own.
   The digests are Tuva's reproducibility record, not a client check (README,
   *Releases*). Any trigger other than a tag push is a dry run.
+- `docs/client-release-consumption.md` (TUVA-69): how a client fork consumes
+  a release (merge the tag through `upstream-sync/*`, build the tag commit and
+  compare digests, pin `PIPELINE_IMAGE`/`CONNECTOR_IMAGE`, run the dev
+  sequence, post evidence), when the maintainer promotes the pre-release, and
+  what "validated" does and does not mean.
 
 ### Changed
 
