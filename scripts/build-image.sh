@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/build-image.sh <repository> <release-id> [--push] [--metadata FILE] [--record FILE]
+  scripts/build-image.sh <repository> <release-id> [--push] [--metadata FILE] [--record FILE] [--check-only]
 
 Builds the linux/amd64 pipeline runtime image from a CLEAN checkout as
 <repository>:<release-id> and records what was built. This is the one build
@@ -18,6 +18,8 @@ tag builds and to record the digests a client build should reproduce.
   --metadata FILE  Write release-provenance metadata (the contract checked by
                    scripts/verify_release_metadata.py): image is
                    <repository>@<manifest digest>.
+  --check-only     Run the clean-checkout and CMS binary checks and exit, so
+                   a caller can refuse before it touches a registry.
   --record FILE    Write the build record: build inputs (extras,
                    SOURCE_DATE_EPOCH) plus the manifest and config digests.
 
@@ -37,9 +39,11 @@ RELEASE_ID=""
 PUSH=false
 METADATA_FILE=""
 RECORD_FILE=""
+CHECK_ONLY=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --push) PUSH=true; shift ;;
+    --check-only) CHECK_ONLY=true; shift ;;
     --metadata) METADATA_FILE="${2:?--metadata needs a file}"; shift 2 ;;
     --record) RECORD_FILE="${2:?--record needs a file}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -88,6 +92,9 @@ fi
   cd "$ROOT_DIR"
   shasum -a 256 -c release/cms-binaries.sha256
 )
+if [[ "$CHECK_ONLY" == true ]]; then
+  exit 0
+fi
 
 extras_for_output_type() {
   local output_type

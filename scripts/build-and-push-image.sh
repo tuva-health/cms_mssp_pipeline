@@ -56,6 +56,9 @@ require_cmd docker
 require_cmd git
 require_cmd python3
 
+# Refuse a dirty checkout or a bad CMS binary before any registry call.
+"$ROOT_DIR/scripts/build-image.sh" "${MSSP_ECR_REPO:-mssp-pipeline}" "$RELEASE_ID" --check-only
+
 REGION="${AWS_REGION:-${REGION:-}}"
 if [[ -z "$REGION" ]]; then
   REGION="$(aws configure get region 2>/dev/null || true)"

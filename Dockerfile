@@ -52,9 +52,12 @@ LABEL org.opencontainers.image.title="mssp-pipeline" \
 
 WORKDIR /app
 
+# The logs and the ldconfig cache are removed because they record install
+# times, which would make every build's layer (and so the digest) unique.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates expect \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* /var/log/apt/* /var/log/dpkg.log \
+      /var/cache/ldconfig/aux-cache
 
 # Non-root runtime user. Created before the application is copied so the copied
 # tree and virtualenv can be owned by it.
@@ -73,6 +76,10 @@ COPY docker/bootstrap-config.sh /usr/local/bin/mssp-bootstrap-config
 # version; --frozen refuses to update it, so the resolved environment is a
 # function of the checkout alone. The extras list is comma-separated and split
 # with POSIX word-splitting (this RUN executes under /bin/sh).
+# For a reproducible layer: no uv cache is left in the image (its directory
+# names are random), and the project's dist-info/uv_cache.json is dropped (with
+# its RECORD line): it holds the build-time ctime of pyproject.toml and only
+# serves a later `uv sync`, which never runs inside the image.
 RUN set -eu; \
     python -m pip install "uv==${UV_VERSION}"; \
     extra_flags=""; \
@@ -82,7 +89,11 @@ RUN set -eu; \
       if [ -n "$_extra" ]; then extra_flags="$extra_flags --extra $_extra"; fi; \
     done; \
     IFS="$old_ifs"; \
-    uv sync --frozen --no-dev $extra_flags
+    UV_NO_CACHE=1 uv sync --frozen --no-dev $extra_flags; \
+    for dist_info in /app/.venv/lib/python*/site-packages/mssp_pipeline-*.dist-info; do \
+      rm -f "$dist_info/uv_cache.json"; \
+      sed -i '/^mssp_pipeline-[^/]*\.dist-info\/uv_cache\.json,/d' "$dist_info/RECORD"; \
+    done
 
 # Verify the bundled CMS ACO-MS CLI against its recorded checksum, then select
 # the Linux build as the runnable binary.

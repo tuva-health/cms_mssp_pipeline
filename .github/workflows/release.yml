@@ -176,7 +176,6 @@ jobs:
           merge-multiple: true
 
       - name: Assemble the release notes and assets
-        id: notes
         run: |
           set -euo pipefail
           builds="$RUNNER_TEMP/builds"
@@ -187,13 +186,18 @@ jobs:
             case "$metadata" in *-rebuild.json) continue ;; esac
             cp "$metadata" "$assets/"
           done
+          # --require-match: a digest the rebuild could not reproduce is not
+          # worth publishing, so a mismatch fails the run (after the summary).
+          status=0
           python3 scripts/release_notes.py notes \
             --tag "$TAG" \
             --records "$builds" \
             --digests-out "$assets/image-digests-$TAG.json" \
-            > "$RUNNER_TEMP/notes.md"
+            --require-match \
+            > "$RUNNER_TEMP/notes.md" || status=$?
           ls -l "$assets"
           cat "$RUNNER_TEMP/notes.md" >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
 
       - name: Upload the rehearsed release (dry run)
         if: env.DRY_RUN == 'true'

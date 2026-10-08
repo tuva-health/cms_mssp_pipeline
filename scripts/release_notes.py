@@ -6,12 +6,15 @@
     non-zero when the section is missing or empty, so a tag cannot be released
     without a changelog entry.
 
-``notes --tag TAG --records DIR [--digests-out FILE]``
+``notes --tag TAG --records DIR [--digests-out FILE] [--require-match]``
     Print the GitHub Release body for TAG from the build records that
     scripts/build-image.sh wrote into DIR (``build-record-<tag>-<variant>.json``,
     one per MSSP_OUTPUT_TYPE variant plus ``<variant>-rebuild`` for the
     reproducibility rebuild), the workbook contract, and the CHANGELOG section.
-    Optionally write the same digests as JSON (a release asset).
+    Optionally write the same digests as JSON (a release asset). With
+    --require-match, exit 3 (after printing the notes) when the rebuild's
+    digests differ from the first build's or no rebuild ran: a release must not
+    publish a digest it could not reproduce.
 """
 
 from __future__ import annotations
@@ -132,12 +135,16 @@ def render(tag: str, variants: list[dict], check: dict | None, contract: dict) -
             f"runner with no shared cache: config digest {verdict[check['config_digest_match']]}, "
             f"manifest digest {verdict[check['manifest_digest_match']]}."
         )
-        if not check["config_digest_match"]:
+        if check["config_digest_match"] and check["manifest_digest_match"]:
+            out.append(
+                "A clean checkout of this tag built with `scripts/build-image.sh` and "
+                "the same `MSSP_OUTPUT_TYPE` should reproduce the digests above."
+            )
+        else:
             out.append(
                 f"Rebuild produced config `{check['rebuild']['config_digest']}` / "
-                f"manifest `{check['rebuild']['manifest_digest']}`. The digests above "
-                "identify this CI build; a client build is not expected to match them "
-                "bit for bit (see README, *Releases*)."
+                f"manifest `{check['rebuild']['manifest_digest']}`. The build did not "
+                "reproduce, so the digests above identify this CI build only."
             )
     out += [
         "",
@@ -166,6 +173,7 @@ def main(argv: list[str] | None = None) -> int:
     notes.add_argument("--tag", required=True)
     notes.add_argument("--records", type=Path, required=True)
     notes.add_argument("--digests-out", type=Path)
+    notes.add_argument("--require-match", action="store_true")
     args = parser.parse_args(argv)
 
     if args.mode == "changelog":
@@ -197,6 +205,11 @@ def main(argv: list[str] | None = None) -> int:
             + "\n",
             encoding="utf-8",
         )
+    if args.require_match and not (
+        check and check["config_digest_match"] and check["manifest_digest_match"]
+    ):
+        print("ERROR: the rebuild did not reproduce the image digests", file=sys.stderr)
+        return 3
     return 0
 
 
