@@ -21,9 +21,6 @@ DROPPED_TABLE = "bnmrk_table_1"
 DRIFTED_CCLF_TABLE = "partb_demo_codes"
 DRIFTED_CCLF_COLUMN = "clm_line_carr_hpsa_scrcty_cd"
 
-FAULTS = ("uppercase-columns", "missing-table", "cclf-source-drift")
-
-
 def _uppercase_columns() -> None:
     """Exporter forgets the lowercase normalisation the contract requires and
     writes every column name upper-cased instead."""
@@ -67,14 +64,18 @@ def _cclf_source_drift() -> None:
     ParquetExporter.export = export
 
 
+# Exporter faults, by --fault name. synthetic_run routes these through this module.
+FAULTS = {
+    "uppercase-columns": _uppercase_columns,
+    "missing-table": _missing_table,
+    "cclf-source-drift": _cclf_source_drift,
+}
+
+
 def main(argv: list[str]) -> None:
     if len(argv) != 1 or argv[0] not in FAULTS:
         raise SystemExit(f"usage: faulty_process {{{','.join(FAULTS)}}}")
-    {
-        "uppercase-columns": _uppercase_columns,
-        "missing-table": _missing_table,
-        "cclf-source-drift": _cclf_source_drift,
-    }[argv[0]]()
+    FAULTS[argv[0]]()
 
     from mssp_pipeline.__main__ import process_main
 

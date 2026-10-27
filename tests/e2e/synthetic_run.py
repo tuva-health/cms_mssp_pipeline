@@ -69,6 +69,7 @@ from mssp_pipeline.sequencer import (
     TaskIdentity,
     TaskResult,
 )
+from tests.e2e import faulty_process
 from tests.e2e.cclf_sources import source_column_violations
 from tests.processing.conftest import ACO_ID, make_cclf_file
 from tests.processing.test_aco_workbook_processors import (
@@ -261,16 +262,21 @@ def load_task(ws: Workspace) -> int:
     return 0
 
 
+def _columns(conn, table: str) -> list[tuple[str, str]]:
+    """(column_name, data_type) of ``SCHEMA.table`` in order; [] if it is missing."""
+    return conn.execute(
+        "SELECT column_name, data_type FROM information_schema.columns "
+        "WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position",
+        [SCHEMA, table],
+    ).fetchall()
+
+
 def conformance_violations(conn, contract: dict) -> list[str]:
     violations: list[str] = []
     for relation in contract["relations"]:
         table = relation["table"]
         declared = [(c["name"], c["type"]) for c in contract["schemas"][relation["schema"]]["columns"]]
-        observed = conn.execute(
-            "SELECT column_name, data_type FROM information_schema.columns "
-            "WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position",
-            [SCHEMA, table],
-        ).fetchall()
+        observed = _columns(conn, table)
         if not observed:
             violations.append(f"{table}: missing")
             continue
@@ -282,28 +288,26 @@ def conformance_violations(conn, contract: dict) -> list[str]:
             violations.append(f"{table}: no rows from a delivery that carries its sheet")
 
     written: dict[str, list[str]] = {}
+    missing: set[str] = set()
     for file_def in CCLF_FILE_DEFS:
         table = file_def.table_name.lower()
         try:
             rows = conn.execute(f"SELECT COUNT(*) FROM {SCHEMA}.{table}").fetchone()[0]
         except duckdb.CatalogException:
             violations.append(f"{table}: CCLF table missing")
+            missing.add(table)
             continue
         # A header-bearing file (CCLF0) spends its first line on the header.
         expected = CCLF_ROWS_PER_FILE - (1 if file_def.has_header else 0)
         if rows != expected:
             violations.append(f"{table}: {rows} rows, expected {expected}")
-        written[table] = [
-            name
-            for (name,) in conn.execute(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position",
-                [SCHEMA, table],
-            ).fetchall()
-        ]
+        written[table] = [name for name, _ in _columns(conn, table)]
 
     # The raw CCLF tables must be what medicare_cclf_connector reads (TUVA-125).
-    violations.extend(source_column_violations(written))
+    # A table already reported missing above is not reported again.
+    violations.extend(
+        v for v in source_column_violations(written) if v.split(":", 1)[0] not in missing
+    )
     return violations
 
 
@@ -323,9 +327,7 @@ def conformance_task(ws: Workspace, contract: dict) -> int:
 
 def run(ws: Workspace, fault: str | None) -> tuple[SequenceResult, list[str]]:
     contract = load_contract()
-    exporter_fault = (
-        fault if fault in ("uppercase-columns", "missing-table", "cclf-source-drift") else None
-    )
+    exporter_fault = fault if fault in faulty_process.FAULTS else None
 
     ecs = LocalEcsClient(
         {
