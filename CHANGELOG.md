@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+This release is required for cms_mssp_connector v1.0.0, which runs
+medicare_cclf_connector v1.0.0. It is planned as **v0.4.0**.
+
+### Changed
+
+- **Breaking:** CCLFA and CCLFB are written as `parta_demo_codes` and
+  `partb_demo_codes`, the raw tables medicare_cclf_connector v1.0.0 reads
+  (TUVA-125). They were `claims_benefit_enhancement_and_demonstration_code_file_cclfa`
+  and `cclfb_claims_benefit_enhancement_and_demonstration_code_file_cclfb`.
+  Anything that reads the old names must move to the new ones. The first run
+  after upgrading loads every CCLFA/CCLFB file in the file store into the new
+  tables, incremental mode included, because the new tables start empty. The
+  old tables are left in place and are no longer updated; drop them once
+  nothing reads them.
+- The synthetic e2e job checks that every raw CCLF table carries the columns
+  medicare_cclf_connector v1.0.0's `models/_sources.yml` declares, vendored and
+  pinned by git blob id at `tests/e2e/fixtures/`. A new injected fault,
+  `cclf-source-drift`, must be caught at `conformance`. See `docs/ci.md`.
+
+### Fixed
+
+- **Breaking:** CCLFB is parsed at its IP v43 layout: 21 fields in a
+  128-character record (TUVA-125). The definition was a copy of the CCLFA
+  layout (33 fields, 324 characters), so every column after
+  `CLM_DEMO_5TH_NUM` was misparsed. `partb_demo_codes` now has
+  `CLM_LINE_NGACO_*` switch columns, 15-character `CLM_PBP_INCLSN_AMT` /
+  `CLM_PBP_RDCTN_AMT`, then `CLM_NGACO_CMG_WVR_SW`, `CLM_MDCR_DDCTBL_AMT`,
+  `CLM_SQSTRTN_RDCTN_AMT` and `CLM_LINE_CARR_HPSA_SCRCTY_CD`. The thirteen
+  CCLFA-only columns it used to carry are gone.
+
 ## [0.3.0] - 2026-10-08
 
 ### Added
