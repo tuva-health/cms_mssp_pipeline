@@ -311,7 +311,7 @@ CCLF_FILE_DEFS: List[CCLFFileDef] = [
         ],
     ),
     CCLFFileDef(
-        table_name="claims_benefit_enhancement_and_demonstration_code_file_cclfa",
+        table_name="parta_demo_codes",
         filename_pattern="ZCA",
         columns=[
             ColumnDef("CUR_CLM_UNIQ_ID", 13),
@@ -350,7 +350,7 @@ CCLF_FILE_DEFS: List[CCLFFileDef] = [
         ],
     ),
     CCLFFileDef(
-        table_name="cclfb_claims_benefit_enhancement_and_demonstration_code_file_cclfb",
+        table_name="partb_demo_codes",
         filename_pattern="ZCB",
         has_header=False,
         columns=[
