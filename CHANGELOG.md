@@ -21,10 +21,13 @@ medicare_cclf_connector v1.0.0. It is planned as **v0.4.0**.
   tables, incremental mode included, because the new tables start empty. The
   old tables are left in place and are no longer updated; drop them once
   nothing reads them.
-- The synthetic e2e job checks that every raw CCLF table carries the columns
-  medicare_cclf_connector v1.0.0's `models/_sources.yml` declares, vendored and
-  pinned by git blob id at `tests/e2e/fixtures/`. A new injected fault,
-  `cclf-source-drift`, must be caught at `conformance`. See `docs/ci.md`.
+- The raw CCLF tables are checked against medicare_cclf_connector v1.0.0's
+  `models/_sources.yml`, vendored at
+  `contracts/medicare_cclf_connector/v1.0.0/_sources.yml`: the CCLF file
+  definitions in the `test` job, the tables `mssp-process` writes in the e2e
+  job. A new injected e2e fault, `cclf-source-drift`, must be caught at
+  `conformance`. See `docs/ci.md`, and README, *Releases*, for when to refresh
+  the vendored copy.
 
 ### Fixed
 

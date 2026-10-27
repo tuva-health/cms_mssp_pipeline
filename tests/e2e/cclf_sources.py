@@ -1,18 +1,13 @@
 """The raw CCLF tables medicare_cclf_connector reads, from its own sources file.
 
-``fixtures/medicare_cclf_connector_sources.yml`` is the connector's
-``models/_sources.yml``, copied byte for byte from the tag below. It is
-vendored rather than fetched so the e2e job stays offline (see the header of
-``.github/workflows/ci.yml``); the git blob id pins the copy to that tag, so a
-hand edit fails loudly instead of quietly redefining the contract.
+``contracts/medicare_cclf_connector/<tag>/_sources.yml`` is the connector's
+``models/_sources.yml``, copied byte for byte from that tag. It is vendored
+rather than fetched so the e2e job stays offline (see the header of
+``.github/workflows/ci.yml``). ``SOURCES_BLOB`` is the file's git blob id at
+the tag: it catches a hand edit of the copy, not a new connector release.
 
-To move to a new connector release, copy the file from the new tag and update
-the three constants:
-
-    git -C <medicare_cclf_connector clone> fetch --tags
-    git -C <clone> show <tag>:models/_sources.yml > tests/e2e/fixtures/medicare_cclf_connector_sources.yml
-    git -C <clone> rev-parse <tag>:models/_sources.yml     # -> SOURCES_BLOB
-    git -C <clone> rev-list -n1 <tag>                      # -> CONNECTOR_COMMIT
+Refresh the copy whenever the medicare_cclf_connector version that
+cms_mssp_connector resolves changes; README, *Releases*, has the steps.
 """
 
 from __future__ import annotations
@@ -22,11 +17,16 @@ from pathlib import Path
 
 import yaml
 
-CONNECTOR_REPO = "https://github.com/tuva-health/medicare_cclf_connector"
 CONNECTOR_TAG = "v1.0.0"
-CONNECTOR_COMMIT = "1deb35646069679bffeee7abf12ce9ab0bf3e29c"
-SOURCES_BLOB = "1b002460ad5b9dc45a8facbb482a59c711b4459e"  # <tag>:models/_sources.yml
-SOURCES_PATH = Path(__file__).resolve().parent / "fixtures" / "medicare_cclf_connector_sources.yml"
+# git rev-parse <tag>:models/_sources.yml (== git hash-object on the copy)
+SOURCES_BLOB = "1b002460ad5b9dc45a8facbb482a59c711b4459e"
+SOURCES_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "contracts"
+    / "medicare_cclf_connector"
+    / CONNECTOR_TAG
+    / "_sources.yml"
+)
 SOURCE_NAME = "medicare_cclf"
 
 # Connector sources the pipeline does not write, and why.

@@ -1,12 +1,14 @@
-"""The e2e's medicare_cclf_connector source-column check (TUVA-125).
+"""The medicare_cclf_connector source-column check (TUVA-125).
 
 The synthetic e2e (`tests/e2e/synthetic_run.py`) runs this comparison against
-the tables `mssp-process` actually wrote; these tests pin the comparison and
-the vendored sources file in the required `test` job.
+the tables `mssp-process` actually wrote. These tests run it against the CCLF
+file definitions too, so drift on the pipeline side fails the required `test`
+job, and pin the comparison and the vendored sources file.
 """
 
 import pytest
 
+from mssp_pipeline.processing.defs.cclf_file_defs import CCLF_FILE_DEFS
 from tests.e2e import cclf_sources
 from tests.e2e.cclf_sources import connector_source_columns, source_column_violations
 
@@ -24,6 +26,19 @@ def test_vendored_sources_are_the_connector_tag():
         "file_name",
         "file_date",
     ]
+
+
+# Lineage columns every processor appends (FileProcessor._metadata_columns).
+METADATA_COLUMNS = ["file_path", "directory_name", "file_name", "file_date"]
+
+
+def test_cclf_file_defs_carry_the_connector_source_columns():
+    # The exporters lowercase every identifier (exporters/base.py).
+    written = {
+        d.table_name.lower(): [c.name.lower() for c in d.columns] + METADATA_COLUMNS
+        for d in CCLF_FILE_DEFS
+    }
+    assert source_column_violations(written) == []
 
 
 def test_an_edited_sources_file_is_rejected(tmp_path):

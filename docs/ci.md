@@ -51,12 +51,13 @@ through):
 
 The CCLF source columns come from medicare_cclf_connector's own
 `models/_sources.yml`, vendored byte for byte at
-`tests/e2e/fixtures/medicare_cclf_connector_sources.yml` and pinned to the
-connector tag by its git blob id (`tests/e2e/cclf_sources.py`, which also
-records the two deliberate exemptions: CCLF `enrollment` is not written, and
-`cclf0_summary_stats_header_record` is not a connector source). Moving to a
-new connector release means re-copying the file from the new tag and updating
-the pin; the module docstring has the commands.
+`contracts/medicare_cclf_connector/<tag>/_sources.yml` and pinned by its git
+blob id (`tests/e2e/cclf_sources.py`, which also records the two deliberate
+exemptions: CCLF `enrollment` is not written, and
+`cclf0_summary_stats_header_record` is not a connector source). The `test`
+job runs the same comparison against the CCLF file definitions, so drift on
+the pipeline side also fails a required check. Neither catches a new connector
+release: refresh the copy as README, *Releases*, describes.
 
 It is deliberately **not** a required check while it beds in; add it to branch
 protection only together with the rule. Run it locally exactly as CI does:
