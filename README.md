@@ -412,7 +412,7 @@ The processing subsystem handles 10 MSSP ACO file types automatically. Files are
 
 | File type | Description | Format | Output tables |
 |---|---|---|---|
-| CCLF | Comprehensive Claim & Line Feed | Fixed-width text | 10+ `parta_*` / `partb_*` tables |
+| CCLF | Comprehensive Claim & Line Feed (IP v43 layouts) | Fixed-width text | `parta_*`, `partb_*`, `partd_claims`, `beneficiary_*` (CCLF1–9, CCLFA `parta_demo_codes`, CCLFB `partb_demo_codes`), named as medicare_cclf_connector v1.0.0's sources; plus `CCLF0_SUMMARY_STATS_HEADER_RECORD` |
 | MSSP (ALR / BEUR / BAIP / NCBP) | Assignment and financial reports | CSV in zip | `AALR1_ASSIGNED_BENEFICIARIES`, `BEUR_*`, and others |
 | MCQM | Medicare Clinical Quality Measures | XLSX in zip through PY2025; CSV files in nested MCQM zip starting PY2026 | `MCQM_BENEFICIARIES`, `MCQM_DM_001SSP`, and others |
 | BNMRK | Historical Benchmark | XLSX | `BNMRK_TABLE_1`, `BNMRK_TABLE_1A`, `BNMRK_TABLE_1B`, `BNMRK_TABLE_1C`, `BNMRK_TABLE_2`–`BNMRK_TABLE_6`, `BNMRK_PARAMETERS` |
@@ -495,7 +495,7 @@ A client fork consumes a release by merging the tag, checking with git that its 
 
 ### Cutting a release
 
-1. On a branch, bump `version` in `pyproject.toml` and move the `[Unreleased]` CHANGELOG entries under `## [X.Y.Z] - <date>`; land it on `main` through a PR.
+1. On a branch, bump `version` in `pyproject.toml` and move the `[Unreleased]` CHANGELOG entries under `## [X.Y.Z] - <date>`; land it on `main` through a PR. If the release supports a new medicare_cclf_connector version, refresh the vendored CCLF source contract first (see below).
 2. Tag the merge commit on `main` and push the tag:
 
    ```bash
@@ -510,6 +510,19 @@ Release assets:
 
 - `release-metadata-<tag>-<output type>.json`: the provenance contract `scripts/verify_release_metadata.py` checks, one per variant. Its `image` (`mssp-pipeline@sha256:…`) names the unpublished CI build; deploy from the metadata your own `scripts/build-and-push-image.sh` run writes.
 - `image-digests-<tag>.json`: every variant's config digest (image ID) and manifest digest, the source commit, `SOURCE_DATE_EPOCH`, and the rebuild check.
+
+### The vendored CCLF source contract
+
+`contracts/medicare_cclf_connector/<tag>/_sources.yml` is medicare_cclf_connector's `models/_sources.yml` at the tag cms_mssp_connector resolves (today `v1.0.0`, through cms_alr_connector). The `test` and `e2e` jobs check the raw CCLF tables against it. **Refresh it whenever cms_mssp_connector moves to a different medicare_cclf_connector version**, in the same pipeline release that supports that connector release. From a medicare_cclf_connector clone with the new tag fetched:
+
+```bash
+TAG=vX.Y.Z CLONE=../medicare_cclf_connector
+git rm -rq contracts/medicare_cclf_connector && mkdir -p contracts/medicare_cclf_connector/$TAG \
+  && git -C $CLONE show $TAG:models/_sources.yml > contracts/medicare_cclf_connector/$TAG/_sources.yml \
+  && git hash-object contracts/medicare_cclf_connector/$TAG/_sources.yml
+```
+
+Then set `CONNECTOR_TAG` to the tag and `SOURCES_BLOB` to the printed blob id in `tests/e2e/cclf_sources.py`, and fix whatever `CCLF_FILE_DEFS` the tests now flag.
 
 ### Release digests
 

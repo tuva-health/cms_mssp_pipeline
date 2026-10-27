@@ -99,7 +99,7 @@ jobs:
         run: |
           set -euo pipefail
           unset AWS_PROFILE
-          for fault in "" uppercase-columns missing-table readiness-blocked lease-held image-drift; do
+          for fault in "" uppercase-columns missing-table cclf-source-drift readiness-blocked lease-held image-drift; do
             echo "::group::e2e ${fault:-clean}"
             uv run --frozen python -m tests.e2e.synthetic_run \
               --workdir "$RUNNER_TEMP/e2e" ${fault:+--fault "$fault"}

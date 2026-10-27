@@ -95,6 +95,9 @@ dev = [
     # boto3 lazily inside the adapters, so a minimal install needs neither moto
     # nor a boto3 import to load the modules.
     "moto[dynamodb,s3]>=5.0",
+    # The e2e reads medicare_cclf_connector's vendored _sources.yml
+    # (tests/e2e/cclf_sources.py).
+    "pyyaml",
 ]
 
 [tool.hatch.build.targets.wheel]
