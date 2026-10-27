@@ -34,7 +34,7 @@ readiness source and a fake ECS client whose tasks run locally:
 | --- | --- | --- |
 | `process` | the real `mssp-process` with `MSSP_OUTPUT_TYPE=PARQUET` | readiness (`bootstrap`, `whitelist`), exact image digest + task revision before launch |
 | `load` | every Parquet output loaded into a local DuckDB (`raw_data`) | output contract: the twenty relations of `contracts/workbook/v1.json`, read through `InformationSchemaOutputSource` |
-| `conformance` | every contracted table checked column-for-column and type-for-type against the contract; CCLF row counts | task exit code |
+| `conformance` | every contracted table checked column-for-column and type-for-type against the contract; CCLF row counts; every raw CCLF table carries the columns medicare_cclf_connector's sources declare | task exit code |
 
 The clean run must pass; then each injected fault must halt the sequence at
 the stage and gate that should catch it (the job fails if a fault slips
@@ -44,9 +44,19 @@ through):
 | --- | --- | --- |
 | `uppercase-columns` | exporter skips the lowercase column normalisation | `conformance` / task |
 | `missing-table` | exporter silently drops `bnmrk_table_1` | `load` / output-contract |
+| `cclf-source-drift` | exporter writes `partb_demo_codes` without `clm_line_carr_hpsa_scrcty_cd` | `conformance` / task |
 | `readiness-blocked` | `whitelist` gate reads `false` | `process` / readiness |
 | `lease-held` | another run holds the lease | `process` / lease |
 | `image-drift` | a family resolves to a different digest than the plan pins | `load` / image-identity |
+
+The CCLF source columns come from medicare_cclf_connector's own
+`models/_sources.yml`, vendored byte for byte at
+`tests/e2e/fixtures/medicare_cclf_connector_sources.yml` and pinned to the
+connector tag by its git blob id (`tests/e2e/cclf_sources.py`, which also
+records the two deliberate exemptions: CCLF `enrollment` is not written, and
+`cclf0_summary_stats_header_record` is not a connector source). Moving to a
+new connector release means re-copying the file from the new tag and updating
+the pin; the module docstring has the commands.
 
 It is deliberately **not** a required check while it beds in; add it to branch
 protection only together with the rule. Run it locally exactly as CI does:

@@ -17,8 +17,10 @@ credentials and no cloud (TUVA-70):
                     workbook contract's accepted output set, verified through
                     the production ``InformationSchemaOutputSource``.
    ``conformance``  checks every contracted table column-for-column and
-                    type-for-type against ``contracts/workbook/v1.json`` and
-                    that the synthetic CCLF rows arrived.
+                    type-for-type against ``contracts/workbook/v1.json``,
+                    that the synthetic CCLF rows arrived, and that the raw
+                    CCLF tables carry the columns medicare_cclf_connector's
+                    sources declare (``tests/e2e/cclf_sources.py``).
 
    So lease acquire/refresh/release, readiness, exact image/revision identity,
    gate ordering and output-contract verification all run in one pass.
@@ -67,6 +69,7 @@ from mssp_pipeline.sequencer import (
     TaskIdentity,
     TaskResult,
 )
+from tests.e2e.cclf_sources import source_column_violations
 from tests.processing.conftest import ACO_ID, make_cclf_file
 from tests.processing.test_aco_workbook_processors import (
     make_bnmrk_bundle,
@@ -89,6 +92,7 @@ CCLF_ROWS_PER_FILE = 2
 EXPECTED_HALT = {
     "uppercase-columns": ("conformance", GATE_TASK),
     "missing-table": ("load", GATE_OUTPUT_CONTRACT),
+    "cclf-source-drift": ("conformance", GATE_TASK),
     "readiness-blocked": ("process", GATE_READINESS),
     "lease-held": ("process", GATE_LEASE),
     "image-drift": ("load", GATE_IMAGE_IDENTITY),
@@ -277,6 +281,7 @@ def conformance_violations(conn, contract: dict) -> list[str]:
         if not relation.get("optional", False) and rows == 0:
             violations.append(f"{table}: no rows from a delivery that carries its sheet")
 
+    written: dict[str, list[str]] = {}
     for file_def in CCLF_FILE_DEFS:
         table = file_def.table_name.lower()
         try:
@@ -288,6 +293,17 @@ def conformance_violations(conn, contract: dict) -> list[str]:
         expected = CCLF_ROWS_PER_FILE - (1 if file_def.has_header else 0)
         if rows != expected:
             violations.append(f"{table}: {rows} rows, expected {expected}")
+        written[table] = [
+            name
+            for (name,) in conn.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position",
+                [SCHEMA, table],
+            ).fetchall()
+        ]
+
+    # The raw CCLF tables must be what medicare_cclf_connector reads (TUVA-125).
+    violations.extend(source_column_violations(written))
     return violations
 
 
@@ -307,7 +323,9 @@ def conformance_task(ws: Workspace, contract: dict) -> int:
 
 def run(ws: Workspace, fault: str | None) -> tuple[SequenceResult, list[str]]:
     contract = load_contract()
-    exporter_fault = fault if fault in ("uppercase-columns", "missing-table") else None
+    exporter_fault = (
+        fault if fault in ("uppercase-columns", "missing-table", "cclf-source-drift") else None
+    )
 
     ecs = LocalEcsClient(
         {
