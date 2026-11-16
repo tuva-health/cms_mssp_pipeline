@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.0] - 2026-11-16
 
 This release is required for cms_mssp_connector v1.0.0, which runs
-medicare_cclf_connector v1.0.0.
+medicare_cclf_connector v1.0.2 through cms_alr_connector v1.1.1. Release
+the two together.
 
 ### Changed
 
@@ -23,9 +24,10 @@ medicare_cclf_connector v1.0.0.
   tables, incremental mode included, because the new tables start empty. The
   old tables are left in place and are no longer updated; drop them once
   nothing reads them.
-- The raw CCLF tables are checked against medicare_cclf_connector v1.0.0's
+- The raw CCLF tables are checked against medicare_cclf_connector v1.0.2's
   `models/_sources.yml`, vendored at
-  `contracts/medicare_cclf_connector/v1.0.0/_sources.yml`: the CCLF file
+  `contracts/medicare_cclf_connector/v1.0.2/_sources.yml` (unchanged from
+  v1.0.0): the CCLF file
   definitions in the `test` job, the tables `mssp-process` writes in the e2e
   job. A new injected e2e fault, `cclf-source-drift`, must be caught at
   `conformance`. See `docs/ci.md`, and README, *Releases*, for when to refresh
