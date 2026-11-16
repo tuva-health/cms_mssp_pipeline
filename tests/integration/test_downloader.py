@@ -63,7 +63,7 @@ def make_fake_zip(directory: Path, name: str) -> Path:
     return zip_path
 
 
-def make_zip_with_member(directory: Path, name: str, member_name: str, content: str = "content") -> Path:
+def make_zip_with_member(directory: Path, name: str, member_name: str, content: str | bytes = "content") -> Path:
     zip_path = directory / name
     with zipfile.ZipFile(zip_path, "w") as zf:
         zf.writestr(member_name, content)
@@ -477,3 +477,29 @@ def test_gcs_skips_already_uploaded_files(mock_uploader_factory, mock_list, mock
     Downloader(cfg, state).run()
 
     mock_download.assert_not_called()
+
+
+def test_extracts_members_in_bounded_chunks(tmp_path):
+    """A member larger than the task's memory must stream to disk, never be read
+    whole: CCLF claim-line members exceed 2 GB (TUVA-146)."""
+    from mssp_pipeline.integration.downloader import _safe_extract_all
+
+    payload = b"x" * (4 * shutil.COPY_BUFSIZE)
+    zip_path = make_zip_with_member(tmp_path, "big.zip", "big.dat", payload)
+
+    read_sizes: list[int] = []
+    real_read = zipfile.ZipExtFile.read
+
+    def tracking_read(self, n=-1):
+        read_sizes.append(n)
+        return real_read(self, n)
+
+    extract_dir = tmp_path / "out"
+    extract_dir.mkdir()
+    with patch.object(zipfile.ZipExtFile, "read", tracking_read):
+        with zipfile.ZipFile(zip_path) as zf:
+            _safe_extract_all(zf, extract_dir)
+
+    assert (extract_dir / "big.dat").read_bytes() == payload
+    assert read_sizes, "extraction never read the member"
+    assert all(0 < n <= shutil.COPY_BUFSIZE for n in read_sizes), read_sizes

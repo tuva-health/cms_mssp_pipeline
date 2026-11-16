@@ -31,6 +31,11 @@ medicare_cclf_connector v1.0.0. It is planned as **v0.4.0**.
 
 ### Fixed
 
+- Zip extraction streams each archive member to disk in bounded chunks
+  (TUVA-146). It read every member whole, so peak memory matched the largest
+  member, and a CCLF claim-line member over 2 GB OOM-killed the download task
+  (exit 137). Nothing was uploaded and `state.json` did not advance, so every
+  later run failed the same way. Introduced by the archive hardening in v0.2.0.
 - **Breaking:** CCLFB is parsed at its IP v43 layout: 21 fields in a
   128-character record (TUVA-125). The definition was a copy of the CCLFA
   layout (33 fields, 324 characters), so every column after
