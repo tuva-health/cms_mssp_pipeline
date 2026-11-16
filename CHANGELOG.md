@@ -7,8 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-16
+
 This release is required for cms_mssp_connector v1.0.0, which runs
-medicare_cclf_connector v1.0.0. It is planned as **v0.4.0**.
+medicare_cclf_connector v1.0.0.
 
 ### Changed
 
@@ -207,6 +209,7 @@ client dev and prod deployment on 2026-09-03/04.
   image, so the in-container verification no longer fails on the excluded
   macOS binary.
 
-[Unreleased]: https://github.com/tuva-health/cms_mssp_pipeline/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/tuva-health/cms_mssp_pipeline/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/tuva-health/cms_mssp_pipeline/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/tuva-health/cms_mssp_pipeline/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/tuva-health/cms_mssp_pipeline/releases/tag/v0.2.0
