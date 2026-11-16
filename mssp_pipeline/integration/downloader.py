@@ -1,6 +1,7 @@
 """Orchestrates the view → compare → download → extract → cleanup loop."""
 
 import os
+import shutil
 import stat
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -135,8 +136,10 @@ def _extract_zip_member(zf: zipfile.ZipFile, member: zipfile.ZipInfo, root: Path
         return
 
     target.parent.mkdir(parents=True, exist_ok=True)
+    # Stream in bounded chunks: a CCLF member can be larger than the task's
+    # memory (claim-line members exceed 2 GB), so it must never be read whole.
     with zf.open(member, "r") as src, target.open("wb") as dst:
-        dst.write(src.read())
+        shutil.copyfileobj(src, dst)
 
 
 def _is_link(member: zipfile.ZipInfo) -> bool:
