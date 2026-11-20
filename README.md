@@ -491,7 +491,7 @@ This pipeline writes the raw tables [cms_mssp_connector](https://github.com/tuva
 
 | cms_mssp_pipeline | cms_mssp_connector | medicare_cclf_connector (via cms_alr_connector) |
 |---|---|---|
-| v0.4.0 | v1.0.0 | v1.0.2 (cms_alr_connector v1.1.1) |
+| v0.4.0 | v1.0.1 | v1.0.2 (cms_alr_connector v1.1.1) |
 
 A pipeline release that supports a new connector release refreshes the vendored CCLF source contract in the same release (*Releases*, below).
 
