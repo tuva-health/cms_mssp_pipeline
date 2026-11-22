@@ -36,8 +36,9 @@ holds, all with fake values:
   connector's `scripts/dbt-pipeline-e2e` builds its benchmark facts on this
   output;
 - a STLMT settlement bundle from the test builder in
-  `tests/processing/test_settlement_submission.py`, whose Table 2, 3 and A1
-  values agree with each other the way a real settlement's do;
+  `tests/processing/test_settlement_submission.py`. Its workbook
+  (`tests/processing/stlmt_workbook.py`) has the real CMS layout, and its
+  values agree across tables the way a real settlement's do;
 - one small fixed-width file per CCLF type.
 
 | Stage | Task | Gate after it |

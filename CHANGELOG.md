@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Breaking for STLMT readers:** the settlement workbook loads in its real
+  layout (TUVA-167), checked against a real PY2025 workbook. The STLMT tables
+  gain three grammar columns, `BLOCK_LABEL`, `ROW_KIND` (`CODE`, `DETAIL`,
+  `TOTAL`) and `COLUMN_CODE`, and the workbook contract moves to 1.3.0 with
+  a new `stlmt_cell_grain` schema for them. Table 3 loads, with all of
+  `[A]`-`[UU]` (it failed with "No header row found"). Table A1's letters,
+  which label its columns, are in `COLUMN_CODE` with clean labels, one row
+  per enrollment type plus `Weighted Average`. Table 2 drops its sub-header
+  text and marks its `[A]` total row `TOTAL`. Table A2's two blocks are
+  labelled and its repeated header is gone. Table A4 is a grid that keeps its
+  column A. Excel's `Column1` spacer columns and U+200B in labels are gone,
+  and Table 1B's blank lettered rows load with NULL cells. cms_mssp_connector's
+  settlement models need rebuilding on this shape (TUVA-168). The STLMT
+  tables have not been released, so there is no upgrade step.
+
 - The final settlement (financial reconciliation) workbook,
   `P.{ACO}.ACO.STLMT.Y{PY}.D…T….xlsx`, now loads (TUVA-158). Its `Table *`
   sheets and `Parameters` tab become thirteen new cell-grain tables:
@@ -54,6 +69,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   table. Snowflake appends by column name and would silently drop it.
 
 ### Fixed
+
+- Sheet discovery could silently miss a sheet (TUVA-167). It read the whole
+  workbook in one `read_sheets()` call, which skips as many leading rows on
+  every later sheet as the first sheet's content starts below row 1. A sheet
+  no taller than that vanished, and its table loaded 0 rows with only a "No
+  sheet matching" line. On a real settlement workbook that was Tables 1C, A1
+  and A5. Discovery now uses `analyze_sheets()`, which reads no cell data.
+  Checked on 28 real BNMRK, QEXPU and AEXPU workbooks: only the `TOC` sheet,
+  which no table reads, was ever missed, so no loaded table lost data, and
+  their output is unchanged.
+
+- A missing sheet is an error unless it is optional (TUVA-167). Only
+  `BNMRK_TABLE_6`, `AEXPU_TABLE_1A`, `AEXPU_TABLE_4A` and `STLMT_TABLE_A6`
+  may be absent, as before; a workbook missing any other sheet now fails
+  that table, and so the run, instead of loading 0 rows silently.
 
 - A settlement AEXPU whose stamp matched a benchmark delivery for the same
   performance year joined that benchmark submission (TUVA-154). The
