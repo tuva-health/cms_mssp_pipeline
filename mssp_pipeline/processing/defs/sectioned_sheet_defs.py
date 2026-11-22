@@ -21,6 +21,12 @@ class SheetDef:
     header_row_hint: int | None = None  # 1-based override when auto-detection fails
     include_notes: bool = False         # keep footnote/notes rows instead of dropping them
 
+    # A sheet some conforming deliveries legitimately lack (BNMRK 'Table 6 -
+    # ACPT', the AEXPU COVID variants, STLMT 'Table A6 - ACPT'). Such a file
+    # contributes 0 rows. Every other sheet is required: a workbook without it
+    # fails the table, and so the run, rather than loading 0 rows silently.
+    optional: bool = False
+
     # Key/value sheets (the "Parameters" tab) carry no column-header row at all:
     # column A is the key, column B the value. Setting this skips header detection
     # entirely, starts data at row 1, and names the columns from B onward. Columns

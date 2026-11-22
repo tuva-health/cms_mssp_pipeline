@@ -22,7 +22,7 @@ STLMT_SHEET_DEFS: List[SheetDef] = [
     SheetDef(table_name="STLMT_TABLE_A3", sheet_pattern="Table A3 - %"),
     SheetDef(table_name="STLMT_TABLE_A4", sheet_pattern="Table A4 - %"),
     SheetDef(table_name="STLMT_TABLE_A5", sheet_pattern="Table A5 - %"),
-    SheetDef(table_name="STLMT_TABLE_A6", sheet_pattern="Table A6 - %"),
+    SheetDef(table_name="STLMT_TABLE_A6", sheet_pattern="Table A6 - %", optional=True),
     SheetDef(
         table_name="STLMT_PARAMETERS",
         sheet_pattern="Parameters",

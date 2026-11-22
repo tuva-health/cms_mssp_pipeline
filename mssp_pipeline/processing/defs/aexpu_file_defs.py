@@ -14,10 +14,10 @@ from .sectioned_sheet_defs import SheetDef
 # SectionedSheetProcessor covers the workbooks that lack them.
 AEXPU_SHEET_DEFS: List[SheetDef] = [
     SheetDef(table_name="AEXPU_TABLE_1", sheet_pattern=r"Table\_1-%"),
-    SheetDef(table_name="AEXPU_TABLE_1A", sheet_pattern=r"Table\_1A-%"),
+    SheetDef(table_name="AEXPU_TABLE_1A", sheet_pattern=r"Table\_1A-%", optional=True),
     SheetDef(table_name="AEXPU_TABLE_3", sheet_pattern=r"Table\_3-%"),
     SheetDef(table_name="AEXPU_TABLE_4", sheet_pattern=r"Table\_4-%"),
-    SheetDef(table_name="AEXPU_TABLE_4A", sheet_pattern=r"Table\_4A-%"),
+    SheetDef(table_name="AEXPU_TABLE_4A", sheet_pattern=r"Table\_4A-%", optional=True),
     SheetDef(
         table_name="AEXPU_PARAMETERS",
         sheet_pattern="Parameters",

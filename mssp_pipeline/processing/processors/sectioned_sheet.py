@@ -136,7 +136,8 @@ class SectionedSheetProcessor(FileProcessor):
         """Return the one sheet name matching sheet_pattern, or None if absent.
 
         Not every delivery carries every sheet (BNMRK "Table 6 - ACPT" is only
-        present for ACOs on the ACPT methodology), so a miss is not an error.
+        present for ACOs on the ACPT methodology), so a miss is not an error
+        here; _build_query() fails the table unless the SheetDef is optional.
         An ambiguous pattern is: 'Table 1%' also matches 'Table 1A - ...' and
         'Table 1B - ...', and silently reading the wrong sheet is far worse than
         failing, so multiple matches raise.
@@ -167,14 +168,22 @@ class SectionedSheetProcessor(FileProcessor):
 
         A read error is deliberately not cached: _build_query() relies on the
         duckdb.Error propagating so it can report the file as unopenable.
+
+        The names come from analyze_sheets(), which inspects each sheet on its
+        own and reads no cell data. A combined read_sheets() over the workbook
+        must not be used for this: it skips as many leading rows on every later
+        sheet as the first sheet's content starts below row 1, and a sheet no
+        taller than that drops out of the result entirely. On a real settlement
+        workbook that silently lost Tables 1C, A1 and A5 (TUVA-167).
+        union_by_name=true avoids the drop but raises when two sheets infer
+        different types for a column of the same name.
         """
         if xlsx_path not in self._sheet_names_cache:
             self._sheet_names_cache[xlsx_path] = [
                 row[0]
                 for row in self.session.connection.execute(f"""
                     SELECT DISTINCT sheet_name
-                    FROM read_sheets([{sql_string_literal(xlsx_path)}],
-                                     sheet_name_column='sheet_name')
+                    FROM analyze_sheets([{sql_string_literal(xlsx_path)}])
                 """).fetchall()
             ]
         return self._sheet_names_cache[xlsx_path]
@@ -190,8 +199,9 @@ class SectionedSheetProcessor(FileProcessor):
         header rows and their column labels have to be read from each workbook
         before the unpivot SQL for that workbook can be written.
 
-        run() calls this once per *batch*, so "no matching sheet" is normal: the
-        Table-6-less BNMRK deliveries may well fill a whole batch. Such a batch
+        run() calls this once per *batch*, so for an optional sheet "no matching
+        sheet" is normal: the Table-6-less BNMRK deliveries may well fill a
+        whole batch. A required sheet missing from any file raises. Such a batch
         returns a zero-row query of the right shape rather than failing the table.
         Only a batch in which every file failed to open is an error.
 
@@ -216,6 +226,12 @@ class SectionedSheetProcessor(FileProcessor):
                     open_failures.append(f"{xlsx_path}: {e}")
                     continue
                 if not exact_sheet:
+                    if not file_def.optional:
+                        raise RuntimeError(
+                            f"Required sheet {file_def.sheet_pattern!r} is missing "
+                            f"from {xlsx_path} ({file_def.table_name}). Only a "
+                            f"SheetDef marked optional may be absent."
+                        )
                     continue
 
                 raw = validate_identifier(

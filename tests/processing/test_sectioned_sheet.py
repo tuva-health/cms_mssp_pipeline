@@ -452,7 +452,8 @@ def test_sheet_without_any_notes(test_session, tmp_path):
 
 
 def test_file_without_matching_sheet_is_skipped(test_session, tmp_path):
-    """BNMRK 'Table 6' is absent from some deliveries — skip that file silently."""
+    """BNMRK 'Table 6' is absent from some deliveries — an optional sheet's
+    absence skips that file silently."""
     with_t6 = make_xlsx(
         tmp_path,
         {"Table 1 - Benchmark": BASIC_SHEET,
@@ -471,7 +472,7 @@ def test_file_without_matching_sheet_is_skipped(test_session, tmp_path):
     conn = run_processor(
         test_session,
         [SheetDef(table_name="SHEET_TABLE", sheet_pattern="Table 1 - %"),
-         SheetDef(table_name="ACPT_TABLE", sheet_pattern="Table 6 - %")],
+         SheetDef(table_name="ACPT_TABLE", sheet_pattern="Table 6 - %", optional=True)],
         [with_t6, without_t6],
     )
 
@@ -487,14 +488,16 @@ def test_file_without_matching_sheet_is_skipped(test_session, tmp_path):
 
 
 def test_batch_with_no_matching_sheet_yields_an_empty_table(test_session, tmp_path):
-    """A batch where no file has the sheet contributes 0 rows — it is not an error.
+    """A batch where no file has an optional sheet contributes 0 rows — it is not an error.
 
     run() calls _build_query() once per batch, so "no matching sheet" has to be a
     per-batch non-event: a whole batch can legitimately consist of Table-6-less
     deliveries.
     """
     path = make_xlsx(tmp_path, {"Table 1 - Benchmark": BASIC_SHEET})
-    conn = run_processor(test_session, defs_for(pattern="Table 9 - %"), [path])
+    conn = run_processor(
+        test_session, defs_for(pattern="Table 9 - %", optional=True), [path]
+    )
 
     assert conn.execute("SELECT COUNT(*) FROM raw_data.sheet_table").fetchone()[0] == 0
     assert [r[0] for r in conn.execute("DESCRIBE raw_data.sheet_table").fetchall()] == [
@@ -530,7 +533,7 @@ def test_sheetless_file_in_a_later_batch_does_not_fail_the_table(test_session, t
 
     conn = run_processor(
         test_session,
-        defs_for(pattern="Table 6 - %", table="ACPT_TABLE"),
+        defs_for(pattern="Table 6 - %", table="ACPT_TABLE", optional=True),
         [with_t6, without_t6],
         config=one_per_batch,
     )
@@ -1232,3 +1235,55 @@ def test_sheet_names_are_read_once_per_workbook(test_session, tmp_path):
         assert conn.execute(
             f"SELECT DISTINCT row_label FROM raw_data.t{n}"
         ).fetchall() == [(f"Row {n}",)]
+
+
+# ---------------------------------------------------------------------------
+# Sheet discovery sees every sheet (TUVA-167)
+# ---------------------------------------------------------------------------
+
+# A cover sheet whose content starts below row 1, as a real CMS cover does.
+# Read together, read_sheets() skips that many leading rows on every later
+# sheet, and a sheet no taller than that vanishes from the combined result.
+_LOW_COVER = [[None]] * 8 + [["Report cover"], ["Prepared for a synthetic ACO"]]
+
+_SHORT_SHEET = [
+    ["Table 9", None, None],
+    ["Risk Calculation", "BY3", "PY"],
+    ["ESRD", "1.1", "1.2"],
+]
+
+
+def test_a_short_sheet_behind_a_low_cover_is_still_discovered(test_session, tmp_path):
+    """Regression: discovery used one combined read_sheets() over the whole
+    workbook. Its sheets differ in shape, and the short one dropped out of the
+    combined read, so its table loaded 0 rows with nothing worse than a 'No
+    sheet matching' line. Every sheet must be found, whatever its shape."""
+    path = make_xlsx(
+        tmp_path,
+        {
+            "Cover": _LOW_COVER,
+            "Table 1 - Benchmark": BASIC_SHEET,
+            "Table 9 - Risk": _SHORT_SHEET,
+        },
+    )
+    conn = run_processor(
+        test_session,
+        [SheetDef(table_name="SHEET_TABLE", sheet_pattern="Table 1 - %"),
+         SheetDef(table_name="RISK_TABLE", sheet_pattern="Table 9 - %")],
+        [path],
+    )
+
+    assert conn.execute(
+        "SELECT row_label, column_label, value_text FROM raw_data.risk_table ORDER BY 2"
+    ).fetchall() == [("ESRD", "BY3", "1.1"), ("ESRD", "PY", "1.2")]
+    assert conn.execute("SELECT COUNT(*) FROM raw_data.sheet_table").fetchone()[0] > 0
+
+
+def test_a_missing_required_sheet_fails_the_run(test_session, tmp_path):
+    """A sheet every delivery carries is required: its absence is an error that
+    names the sheet and the file, never a silent zero-row table."""
+    path = make_xlsx(tmp_path, {"Table 1 - Benchmark": BASIC_SHEET})
+    with pytest.raises(RuntimeError, match="Table 9 - %") as excinfo:
+        run_processor(test_session, defs_for(pattern="Table 9 - %"), [path])
+    assert "report.xlsx" in str(excinfo.value)
+    assert "required" in str(excinfo.value)
