@@ -31,6 +31,22 @@ class SheetDef:
     # fails the table, and so the run, rather than loading 0 rows silently.
     optional: bool = False
 
+    # Layouts of the settlement (STLMT) workbook. They take effect on a
+    # processor with LAYOUT_COLUMNS (see SectionedSheetProcessor).
+    #
+    # heading_cells_are_labels: a lettered row heading detail rows carries
+    #   sub-header text in its cells ('3-Year Average Benchmark', 'BY3'), not
+    #   values, so it emits nothing (settlement Table 2).
+    # blocks: the sheet is a stack of blocks, each a title row, a header row and
+    #   data rows. Titles fill BLOCK_LABEL, and a header row repeated by a later
+    #   block is dropped (settlement Table A2).
+    # label_column_is_data: column A holds data, not row labels. It is emitted as
+    #   a value column under its header label, and also keys the row as
+    #   ROW_LABEL (settlement Table A4, a lookup grid).
+    heading_cells_are_labels: bool = False
+    blocks: bool = False
+    label_column_is_data: bool = False
+
     # Key/value sheets (the "Parameters" tab) carry no column-header row at all:
     # column A is the key, column B the value. Setting this skips header detection
     # entirely, starts data at row 1, and names the columns from B onward. Columns
