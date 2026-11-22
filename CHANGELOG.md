@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Workbook tables carry `IS_EMBARGOED` (BOOLEAN), and the workbook contract
+  moves to 1.1.0 (TUVA-154). It is set only on rows from a final settlement
+  (STLMT) bundle: `TRUE` for the embargoed delivery (`T0000000`), `FALSE` for
+  the unembargoed one (`T1111111`). Any other stamp falls back to the
+  Embargoed/Unembargoed FinRec notice file in the bundle, else NULL. Both
+  copies load as separate submissions. Every other row is NULL.
+
+### Changed
+
+- **Breaking:** files in a final settlement (STLMT) bundle get their own
+  `SUBMISSION_ID`: `STLMT.` plus the bundle directory's stamp, for example
+  `STLMT.D259999.T1111111` (TUVA-154). Benchmark and quarterly
+  `SUBMISSION_ID`s are unchanged.
+- **Upgrade:** run the BNMRK, AEXPU and QEXPU tables once with full refresh
+  (or drop them). An incremental run does not reload files it has already
+  loaded, so earlier settlement rows keep the old `SUBMISSION_ID`, and the
+  DuckDB and Parquet exporters cannot append the new column to an existing
+  table. Snowflake appends by column name and would silently drop it.
+
+### Fixed
+
+- A settlement AEXPU whose stamp matched a benchmark delivery for the same
+  performance year joined that benchmark submission (TUVA-154). The
+  submission then held four workbooks, and cms_mssp_connector labelled them
+  BY0–BY3, failing its `accepted_values` test on `BENCHMARK_YEAR_LABEL`. The
+  benchmark submission now holds only its three benchmark years.
+
 ## [0.4.0] - 2026-11-16
 
 This release is required for cms_mssp_connector v1.0.0, which runs

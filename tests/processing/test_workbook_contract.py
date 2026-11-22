@@ -84,7 +84,7 @@ def contract():
 
 def test_contract_declares_an_exact_version(contract):
     """The contract is exactly versioned — v1 is pinned, not open-ended."""
-    assert contract["version"] == "1.0.0"
+    assert contract["version"] == "1.1.0"
     assert contract["grain"] == "cell"
 
 

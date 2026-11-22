@@ -425,7 +425,9 @@ The processing subsystem handles 10 MSSP ACO file types automatically. Files are
 
 Every output table includes `FILE_PATH`, `FILE_NAME`, `DIRECTORY_NAME`, and `FILE_DATE` metadata columns for lineage tracking and incremental deduplication.
 
-The BNMRK / AEXPU / QEXPU workbook tables are emitted in a long/tidy shape — `ROW_NUM`, `GROUP_LABEL`, `SECTION_CODE`, `SECTION_LABEL`, `ROW_LABEL`, `COLUMN_GROUP_LABEL`, `COLUMN_LABEL`, `VALUE_TEXT` — and additionally carry `ACO_ID`, `PERFORMANCE_YEAR`, `BENCHMARK_YEAR`, `SUBMISSION_ID` and `PERIOD`. All values are VARCHAR; typing and casting happen downstream.
+The BNMRK / AEXPU / QEXPU workbook tables are emitted in a long/tidy shape — `ROW_NUM`, `GROUP_LABEL`, `SECTION_CODE`, `SECTION_LABEL`, `ROW_LABEL`, `COLUMN_GROUP_LABEL`, `COLUMN_LABEL`, `VALUE_TEXT` — and additionally carry `ACO_ID`, `PERFORMANCE_YEAR`, `BENCHMARK_YEAR`, `SUBMISSION_ID`, `PERIOD` and `IS_EMBARGOED`. Cell values are VARCHAR; typing and casting happen downstream.
+
+`SUBMISSION_ID` identifies the delivery. For benchmark and quarterly files it is the file's `D<YYMMDD>.T<NNNNNNN>` stamp. A file inside a final settlement bundle (`P.{ACO}.ACO.STLMT.D…T…/`) gets `STLMT.` plus the bundle directory's stamp, for example `STLMT.D259999.T1111111`. A settlement can share its stamp with a benchmark delivery, and the prefix keeps the settlement's AEXPU out of that benchmark submission. `IS_EMBARGOED` is set only on settlement rows. CMS can deliver a settlement twice: `T0000000` is the embargoed copy (`TRUE`) and `T1111111` the unembargoed one (`FALSE`). Any other stamp falls back to the Embargoed/Unembargoed FinRec notice file in the bundle, and to NULL when neither settles it. Both copies load; a reader should prefer `IS_EMBARGOED = FALSE`.
 
 Not every delivery carries every sheet, and a missing one is expected rather than an error: `BNMRK_TABLE_6` (ACPT) is absent from the March preliminary benchmark, and the COVID-excluding `AEXPU_TABLE_1A` / `AEXPU_TABLE_4A` are present for benchmark years 1 and 2 but not benchmark year 3. Those tables are legitimately empty for the deliveries and years that omit them.
 
