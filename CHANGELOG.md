@@ -21,9 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** files in a final settlement (STLMT) bundle get their own
   `SUBMISSION_ID`: `STLMT.` plus the bundle directory's stamp, for example
   `STLMT.D259999.T1111111` (TUVA-154). Benchmark and quarterly
-  `SUBMISSION_ID`s are unchanged.
-- **Upgrade:** run the BNMRK, AEXPU and QEXPU tables once with full refresh
-  (or drop them). An incremental run does not reload files it has already
+  `SUBMISSION_ID`s are unchanged. This covers every workbook the BNMRK,
+  AEXPU and QEXPU processors read; no other processor carries a
+  `SUBMISSION_ID`. To upgrade, run the BNMRK, AEXPU and QEXPU tables once
+  with full refresh (or drop them). An incremental run does not reload files it has already
   loaded, so earlier settlement rows keep the old `SUBMISSION_ID`, and the
   DuckDB and Parquet exporters cannot append the new column to an existing
   table. Snowflake appends by column name and would silently drop it.

@@ -23,6 +23,7 @@ Every fixture is synthetic.
 """
 
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
@@ -49,15 +50,15 @@ def make_stlmt_bundle(
     code: str = "01",
     date_str: str = "259999",
     time_str: str = UNEMBARGOED,
-    file_time_str: str = None,
-    notice: str = None,
+    file_time_str: Optional[str] = None,
+    notices=(),
     aco: str = ACO_ID,
 ) -> Path:
     """Build one settlement bundle holding the performance year's AEXPU::
 
         raw_dir/T0000/{year}/{code}/P.T0000.ACO.STLMT.D{date}.T{time}/
             P.T0000.ACO.AEXPU.Y{year}.D{date}.T{file_time}.xlsx
-            [<notice>]                     <- optional FinRec notice file
+            [<notice> ...]                 <- optional FinRec notice file(s)
 
     ``file_time_str`` defaults to the bundle's own T stamp.
     """
@@ -66,8 +67,8 @@ def make_stlmt_bundle(
     write_workbook(
         bundle / f"P.{aco}.ACO.AEXPU.Y{year}.{file_stamp}.xlsx", aexpu_sheets(year)
     )
-    if notice:
-        (bundle / notice).write_bytes(b"%PDF-1.4 synthetic notice")
+    for name in notices:
+        (bundle / name).write_bytes(b"%PDF-1.4 synthetic notice")
     return bundle
 
 
@@ -172,21 +173,26 @@ def test_embargoed_and_unembargoed_copies_both_load_and_are_flagged(
 
 
 @pytest.mark.parametrize(
-    "notice,expected",
+    "notices,expected",
     [
-        ("P.T0000.ACO.STLMT.Y2025.Embargoed FinRec notice.pdf", True),
-        ("P.T0000.ACO.STLMT.Y2025.Unembargoed FinRec notice.pdf", False),
-        ("P.T0000.ACO.STLMT.Y2025.UNEMBARGOED_FINREC_NOTICE.pdf", False),
-        (None, None),
+        ([f"P.{ACO_ID}.ACO.STLMT.Y2025.Embargoed FinRec notice.pdf"], True),
+        ([f"P.{ACO_ID}.ACO.STLMT.Y2025.Unembargoed FinRec notice.pdf"], False),
+        ([f"P.{ACO_ID}.ACO.STLMT.Y2025.UNEMBARGOED_FINREC_NOTICE.pdf"], False),
+        ([], None),
+        # Both notices contradict each other: no guess.
+        ([f"P.{ACO_ID}.ACO.STLMT.Y2025.Embargoed FinRec notice.pdf",
+          f"P.{ACO_ID}.ACO.STLMT.Y2025.Unembargoed FinRec notice.pdf"], None),
+        # A file that mentions the embargo but is not a notice says nothing.
+        ([f"P.{ACO_ID}.ACO.STLMT.Y2025.embargo-schedule.txt"], None),
     ],
 )
 def test_a_stamp_without_an_embargo_code_falls_back_to_the_notice_file(
-    test_session, test_config, raw_dir, notice, expected
+    test_session, test_config, raw_dir, notices, expected
 ):
     """A T stamp other than T0000000/T1111111 says nothing about the embargo.
     The FinRec notice file in the bundle decides; with no notice the flag is
     NULL rather than a guess."""
-    make_stlmt_bundle(raw_dir, time_str="1234567", notice=notice)
+    make_stlmt_bundle(raw_dir, time_str="1234567", notices=notices)
     conn = run(AEXPUProcessor, test_session, test_config)
 
     assert conn.execute(
@@ -200,7 +206,7 @@ def test_the_stamp_wins_over_a_contradicting_notice_file(
     make_stlmt_bundle(
         raw_dir,
         time_str=UNEMBARGOED,
-        notice="P.T0000.ACO.STLMT.Y2025.Embargoed FinRec notice.pdf",
+        notices=[f"P.{ACO_ID}.ACO.STLMT.Y2025.Embargoed FinRec notice.pdf"],
     )
     conn = run(AEXPUProcessor, test_session, test_config)
 

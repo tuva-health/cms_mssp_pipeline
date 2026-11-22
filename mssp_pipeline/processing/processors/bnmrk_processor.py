@@ -32,6 +32,6 @@ class BNMRKProcessor(ACOWorkbookProcessor):
 
         # No year token in the filename at all — BENCHMARK_YEAR is not a BNMRK
         # concept and PERFORMANCE_YEAR comes from the directory layout.
-        metadata["PERIOD"] = _varchar(self._submission_id(file_name))
+        metadata["PERIOD"] = _varchar(self._submission_id(xlsx_path.replace("\\", "/")))
         metadata["FILE_DATE"] = _date_literal(self._submission_date(file_name))
         return metadata
