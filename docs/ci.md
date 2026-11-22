@@ -25,10 +25,20 @@ one only together with the protection rule.
 ## Synthetic end-to-end job (`e2e`, not required)
 
 `e2e` runs `tests/e2e/synthetic_run.py`: it writes a synthetic CMS delivery
-(the openpyxl BNMRK / AEXPU / QEXPU / STLMT workbook fixtures plus one small
-fixed-width file per CCLF type, all fake values) and drives a three-stage plan
+for ACO `A0000` and drives a three-stage plan
 through the real sequencer engine with the in-memory lease store, a synthetic
-readiness source and a fake ECS client whose tasks run locally:
+readiness source and a fake ECS client whose tasks run locally. The delivery
+holds, all with fake values:
+
+- the CMS-consistent BNMRK / AEXPU / QEXPU workbooks that cms_mssp_connector's
+  integration seeds describe, rendered by `tests/e2e/cms_workbooks.py` from a
+  copy of those seeds (see README, *The vendored workbook fixtures*). The
+  connector's `scripts/dbt-pipeline-e2e` builds its benchmark facts on this
+  output;
+- a STLMT settlement bundle from the test builder in
+  `tests/processing/test_settlement_submission.py`, whose Table 2, 3 and A1
+  values agree with each other the way a real settlement's do;
+- one small fixed-width file per CCLF type.
 
 | Stage | Task | Gate after it |
 | --- | --- | --- |

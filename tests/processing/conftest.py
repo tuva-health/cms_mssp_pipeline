@@ -137,6 +137,7 @@ def make_cclf_file(
     rows: list,
     date_str: str = TEST_DATE_STR,
     bundle_suffix: str = "",
+    aco: str = ACO_ID,
 ) -> Path:
     """Create a CCLF plain-text fixture mirroring the new delivery structure:
 
@@ -153,10 +154,10 @@ def make_cclf_file(
 
     Returns the path to the created file.
     """
-    bundle_dir = raw_dir / ACO_ID / "2025" / "ZCY25" / f"P.{ACO_ID}.ACO.ZCY25{bundle_suffix}"
+    bundle_dir = raw_dir / aco / "2025" / "ZCY25" / f"P.{aco}.ACO.ZCY25{bundle_suffix}"
     bundle_dir.mkdir(parents=True, exist_ok=True)
 
-    file_name = f"P.{ACO_ID}.ACO.{file_def.filename_pattern}.D{date_str}.T000000001"
+    file_name = f"P.{aco}.ACO.{file_def.filename_pattern}.D{date_str}.T000000001"
     content = "\n".join(build_cclf_line(file_def, row) for row in rows).encode()
 
     file_path = bundle_dir / file_name

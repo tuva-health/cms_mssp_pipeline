@@ -539,6 +539,24 @@ git rm -rq contracts/medicare_cclf_connector && mkdir -p contracts/medicare_cclf
 
 Then set `CONNECTOR_TAG` to the tag and `SOURCES_BLOB` to the printed blob id in `tests/e2e/cclf_sources.py`, and fix whatever `CCLF_FILE_DEFS` the tests now flag.
 
+### The vendored workbook fixtures
+
+`tests/e2e/fixtures/workbooks/*.csv` are cms_mssp_connector's
+`integration_tests/seeds/workbooks/` seeds, copied unchanged. `cclf-synth
+generate-mssp` builds them: the cell-grain rows mssp-process writes for a
+CMS-consistent synthetic PY2025 delivery for ACO `A0000`, the ACO of the
+connector's ALR seeds. The e2e run renders them back into xlsx workbooks
+(`tests/e2e/cms_workbooks.py`), and `tests/e2e/test_cms_workbooks.py` checks
+that the processors parse those workbooks into exactly the seed rows. So the
+pipeline's synthetic output and the connector's seeds stay the same data.
+`E2E_ACO_ID` in `tests/e2e/cms_workbooks.py` is the one place the e2e ACO is
+set. **Copy the seeds again whenever the connector regenerates them**; never
+edit them by hand:
+
+```bash
+cp ../cms_mssp_connector/integration_tests/seeds/workbooks/*.csv tests/e2e/fixtures/workbooks/
+```
+
 ### Release digests
 
 The recorded digests are Tuva's internal reproducibility guarantee: every release rebuilds a variant on a second runner and fails if the digests differ. Clients do not rebuild the tag or compare digests; a client fork proves it carries a release with a git conformance check, as described in [`docs/client-release-consumption.md`](docs/client-release-consumption.md).

@@ -3,9 +3,12 @@
 Exercises the pipeline as one integrated whole with no client data, no
 credentials and no cloud (TUVA-70):
 
-1. Build a synthetic CMS delivery into a local file store from the existing
-   test builders: the openpyxl BNMRK / AEXPU / QEXPU / STLMT workbooks and one
-   small fixed-width file per CCLF type. Every value is fake.
+1. Build a synthetic CMS delivery into a local file store for ACO
+   ``cms_workbooks.E2E_ACO_ID`` (cms_mssp_connector's seed ACO): the
+   CMS-consistent BNMRK / AEXPU / QEXPU workbooks the connector's seeds
+   describe (``tests/e2e/cms_workbooks.py``), a STLMT settlement bundle from
+   the test builder, and one small fixed-width file per CCLF type. Every
+   value is fake.
 2. Drive a staged plan through the real sequencer engine
    (`mssp_pipeline.sequencer.Sequencer`) with the in-memory lease store, a
    synthetic readiness source and a fake ECS client whose "tasks" run locally:
@@ -69,14 +72,11 @@ from mssp_pipeline.sequencer import (
     TaskIdentity,
     TaskResult,
 )
-from tests.e2e import faulty_process
+from tests.e2e import cms_workbooks, faulty_process
 from tests.e2e.cclf_sources import source_column_violations
-from tests.processing.conftest import ACO_ID, make_cclf_file
-from tests.processing.test_aco_workbook_processors import (
-    make_bnmrk_bundle,
-    make_qexpu_bundle,
-)
-from tests.processing.test_settlement_submission import make_stlmt_bundle
+from tests.e2e.cms_workbooks import E2E_ACO_ID
+from tests.processing.conftest import make_cclf_file
+from tests.processing.test_settlement_submission import UNEMBARGOED, make_stlmt_bundle
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = REPO_ROOT / "contracts" / "workbook" / "v1.json"
@@ -106,16 +106,39 @@ EXPECTED_HALT = {
 # ---------------------------------------------------------------------------
 
 
+# The settlement bundle: PY2025, on the final benchmark delivery's stamp, so
+# the run also proves a settlement AEXPU keeps out of that submission (TUVA-154).
+SETTLEMENT_YEAR = "2025"
+SETTLEMENT_DATE = "259999"
+# Its AEXPU takes the CMS layout of the final delivery's BY3 workbook. Its
+# values are that workbook's: no settlement-year expenditure is generated yet.
+SETTLEMENT_AEXPU_LAYOUT = (
+    f"{E2E_ACO_ID}/2025/01/P.{E2E_ACO_ID}.ACO.BNMRK.D259999.T{UNEMBARGOED}/"
+    f"P.{E2E_ACO_ID}.ACO.AEXPU.Y2024.D259999.T{UNEMBARGOED}.xlsx"
+)
+
+
 def build_delivery(store: Path) -> None:
     """Write the synthetic CMS delivery: workbooks plus one file per CCLF type."""
     store.mkdir(parents=True, exist_ok=True)
-    make_bnmrk_bundle(store)
-    make_qexpu_bundle(store)
-    make_stlmt_bundle(store)
+    cms_workbooks.render_delivery(store)
+    bundle = make_stlmt_bundle(
+        store,
+        year=SETTLEMENT_YEAR,
+        date_str=SETTLEMENT_DATE,
+        time_str=UNEMBARGOED,
+        aco=E2E_ACO_ID,
+        with_aexpu=False,
+    )
+    cms_workbooks.write_workbook(
+        bundle
+        / f"P.{E2E_ACO_ID}.ACO.AEXPU.Y{SETTLEMENT_YEAR}.D{SETTLEMENT_DATE}.T{UNEMBARGOED}.xlsx",
+        cms_workbooks.workbook_sheets(SETTLEMENT_AEXPU_LAYOUT),
+    )
     for file_def in CCLF_FILE_DEFS:
         first = file_def.columns[0]
         rows = [{first.name: str(n).zfill(first.width)} for n in range(1, CCLF_ROWS_PER_FILE + 1)]
-        make_cclf_file(store, file_def, rows)
+        make_cclf_file(store, file_def, rows, aco=E2E_ACO_ID)
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +256,7 @@ def process_task(ws: Workspace, exporter_fault: str | None) -> int:
         if not k.startswith(("MSSP_", "SNOWFLAKE_", "AWS_PROFILE"))
     }
     env.update(
-        MSSP_ACO_ID=ACO_ID,
+        MSSP_ACO_ID=E2E_ACO_ID,
         MSSP_FILE_STORE=str(ws.store),
         MSSP_OUTPUT_TYPE="PARQUET",
         MSSP_OUTPUT_LOCATION=str(ws.parquet),

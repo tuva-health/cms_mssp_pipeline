@@ -37,10 +37,14 @@ from .test_aco_workbook_processors import (
     write_workbook,
 )
 from .test_settlement_submission import (
+    BY3_RISK_SCORE,
     EMBARGOED,
+    PY_RISK_SCORE,
     STLMT_SHEET_BY_TABLE,
+    TYPE_BENCHMARK,
     TYPES,
     UNEMBARGOED,
+    UPDATED_BENCHMARK,
     make_stlmt_bundle,
     stlmt_sheets,
 )
@@ -301,13 +305,13 @@ def test_table_2_updated_benchmark_rows(test_session, test_config, raw_dir):
     # [I] carries its value on the lettered row itself.
     assert _cells(conn, "stlmt_table_2", "I") == [
         ("Updated Benchmark ($)", "BY3", "-"),
-        ("Updated Benchmark ($)", "Performance Year", "12345.67"),
+        ("Updated Benchmark ($)", "Performance Year", UPDATED_BENCHMARK),
     ]
     # [H] heads one row per enrollment type.
     assert [
         (row, value) for row, column, value in _cells(conn, "stlmt_table_2", "H")
         if column == "Performance Year"
-    ] == [(t, "10000") for t in TYPES]
+    ] == [(t, TYPE_BENCHMARK[t]) for t in TYPES]
     assert conn.execute(
         "SELECT DISTINCT section_label FROM raw_data.stlmt_table_2 WHERE section_code = 'H'"
     ).fetchall() == [("Updated Historical Benchmark Expenditure ($)",)]
@@ -352,13 +356,79 @@ def test_table_a1_risk_blocks_by_enrollment_type(test_session, test_config, raw_
         "SELECT row_label, column_label, value_text FROM raw_data.stlmt_table_a1 "
         "WHERE section_code = 'B' AND row_label = 'Disabled' ORDER BY column_label"
     ).fetchall() == [
-        ("Disabled", "BY3", "1.01"),
-        ("Disabled", "Performance Year", "1.02"),
+        ("Disabled", "BY3", BY3_RISK_SCORE["Disabled"]),
+        ("Disabled", "Performance Year", PY_RISK_SCORE["Disabled"]),
     ]
     assert conn.execute(
         "SELECT COUNT(DISTINCT row_label) FROM raw_data.stlmt_table_a1 "
         "WHERE section_code = 'F'"
     ).fetchone()[0] == len(TYPES)
+
+
+# ===========================================================================
+# The fixture's values follow the CMS calculation (TUVA-165)
+#
+# TUVA-159 and TUVA-162 assert against these numbers, so they must agree with
+# each other the way a real settlement's do, read back through the processor.
+# ===========================================================================
+
+
+def _numbers(conn, table, section_code, column):
+    """{row_label: float} for one lettered block and one value column.
+
+    The sheet-marker row ('Row Unique To Table N') is not a figure.
+    """
+    return {
+        row: float(value.replace(",", ""))
+        for row, col, value in _cells(conn, table, section_code)
+        if col == column
+        and value not in ("-", "N/A")
+        and not row.startswith("Row Unique To")
+    }
+
+
+def test_table_2_updated_benchmark_is_the_person_year_weighted_type_benchmark(
+    test_session, test_config, raw_dir
+):
+    make_stlmt_bundle(raw_dir)
+    conn = run(STLMTProcessor, test_session, test_config)
+
+    person_years = _numbers(conn, "stlmt_table_3", "B", "Performance Year")
+    assert set(person_years) == set(TYPES)
+    assigned = _numbers(conn, "stlmt_table_3", "A", "Performance Year")["Assigned Beneficiaries"]
+    assert sum(person_years.values()) <= assigned
+
+    # Table 2 [A]: each type's share of performance-year person years.
+    shares = _numbers(conn, "stlmt_table_2", "A", "Performance Year")
+    total = sum(person_years.values())
+    assert {t: shares[t] for t in TYPES} == pytest.approx(
+        {t: person_years[t] / total for t in TYPES}
+    )
+
+    # [I] = sum over types of [A] x [H].
+    type_benchmark = _numbers(conn, "stlmt_table_2", "H", "Performance Year")
+    updated = _numbers(conn, "stlmt_table_2", "I", "Performance Year")["Updated Benchmark ($)"]
+    assert updated == pytest.approx(sum(shares[t] * type_benchmark[t] for t in TYPES))
+    # The types differ, so a wrong weighting cannot pass by accident.
+    assert len(set(type_benchmark.values())) == len(TYPES)
+
+
+def test_table_a1_capped_ratio_is_the_score_ratio_below_the_cap(
+    test_session, test_config, raw_dir
+):
+    make_stlmt_bundle(raw_dir)
+    conn = run(STLMTProcessor, test_session, test_config)
+
+    by3 = _numbers(conn, "stlmt_table_a1", "B", "BY3")
+    py = _numbers(conn, "stlmt_table_a1", "B", "Performance Year")
+    capped = _numbers(conn, "stlmt_table_a1", "F", "Performance Year")
+    assert set(by3) == set(py) == set(capped) == set(TYPES)
+    for t in TYPES:
+        ratio = py[t] / by3[t]
+        # No demographic growth: the cap is 1.03 and binds for no type.
+        assert ratio < 1.03
+        assert capped[t] == pytest.approx(ratio)
+    assert len(set(capped.values())) == len(TYPES)
 
 
 # ===========================================================================

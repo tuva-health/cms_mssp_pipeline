@@ -64,6 +64,32 @@ def _type_rows(*values) -> list:
     return [[t, *values] for t in TYPES]
 
 
+def _per_type_rows(*columns: dict) -> list:
+    """One row per enrollment type; each column is a {type: value} mapping."""
+    return [[t, *(column[t] for column in columns)] for t in TYPES]
+
+
+def _all_types(value: str) -> dict:
+    return {t: value for t in TYPES}
+
+
+# The values of Tables 2, 3 and A1 follow the CMS calculation, so TUVA-159 and
+# TUVA-162 can assert against them (TUVA-165); every number is made up.
+#
+# Table 3 [B] performance-year person years, which weight everything else.
+PERSON_YEARS = {"ESRD": "20", "Disabled": "80", "Aged/dual": "100", "Aged/non-dual": "800"}
+# Table 2 [A] each type's share of them, and [H] its updated benchmark.
+PERSON_YEAR_SHARES = {"ESRD": "0.02", "Disabled": "0.08", "Aged/dual": "0.1", "Aged/non-dual": "0.8"}
+TYPE_BENCHMARK = {"ESRD": "95000", "Disabled": "14000", "Aged/dual": "21000", "Aged/non-dual": "11000"}
+# [I] = sum of [A] x [H] = 1900 + 1120 + 2100 + 8800.
+UPDATED_BENCHMARK = "13920"
+# Table A1 [B] CMS-HCC scores, and [F] the PY / BY3 ratio. Demographic growth
+# is nil, so the cap is 1.03 and binds for no type.
+BY3_RISK_SCORE = {"ESRD": "1.04", "Disabled": "0.95", "Aged/dual": "1.2", "Aged/non-dual": "0.88"}
+PY_RISK_SCORE = {"ESRD": "1.0504", "Disabled": "0.931", "Aged/dual": "1.224", "Aged/non-dual": "0.8932"}
+CAPPED_RISK_RATIO = {"ESRD": "1.01", "Disabled": "0.98", "Aged/dual": "1.02", "Aged/non-dual": "1.015"}
+
+
 def stlmt_matrix(tag: str, columns=("BY3", "Performance Year")) -> list:
     """A settlement data sheet in the BNMRK layout, unique to its table."""
     blanks = [None] * len(columns)
@@ -88,10 +114,10 @@ STLMT_TABLE_2 = [
     ["Updated Benchmark Calculation", "BY3", "Performance Year"],
     ["[A] Table 2 Section", None, None],
     ["Row Unique To Table 2", "2-0", "2-1"],
-    *_type_rows("-", "0.5"),
+    *_per_type_rows(_all_types("-"), PERSON_YEAR_SHARES),
     ["[H] Updated Historical Benchmark Expenditure ($)", None, None],
-    *_type_rows("-", "10000"),
-    ["[I] Updated Benchmark ($)", "-", "12345.67"],
+    *_per_type_rows(_all_types("-"), TYPE_BENCHMARK),
+    ["[I] Updated Benchmark ($)", "-", UPDATED_BENCHMARK],
     ["Note: Numerical values are synthetic.", None, None],
     ["[I] Weighted by performance year person years.", None, None],
 ]
@@ -106,9 +132,9 @@ STLMT_TABLE_3 = [
     ["[U] Table 3 Section", None, None],
     ["Row Unique To Table 3", "3-0", "3-1"],
     ["Determine Savings", None, None],
-    ["[A] Assigned Beneficiaries", "1000", "-"],
+    ["[A] Assigned Beneficiaries", "1050", "-"],
     ["[B] Person Years", None, None],
-    *_type_rows("250", "-"),
+    *_per_type_rows(PERSON_YEARS, _all_types("-")),
     ["[P] Savings Realized", "-", "N/A"],
     ["Determine Earned Payment", None, None],
     ["[AA] Final Sharing Rate", "-", "0.5"],
@@ -126,9 +152,9 @@ STLMT_TABLE_A1 = [
     ["[A] Table A1 Section", None, None],
     ["Row Unique To Table A1", "A1-0", "A1-1"],
     ["[B] CMS-HCC Risk Score", None, None],
-    *_type_rows("1.01", "1.02"),
+    *_per_type_rows(BY3_RISK_SCORE, PY_RISK_SCORE),
     ["[F] Capped CMS-HCC Risk Ratio", None, None],
-    *_type_rows("-", "1.003"),
+    *_per_type_rows(_all_types("-"), CAPPED_RISK_RATIO),
     ["Note: Numerical values are synthetic.", None, None],
 ]
 
@@ -173,6 +199,7 @@ def make_stlmt_bundle(
     notices=(),
     aco: str = ACO_ID,
     with_table_a6: bool = True,
+    with_aexpu: bool = True,
 ) -> Path:
     """Build one settlement bundle::
 
@@ -181,7 +208,8 @@ def make_stlmt_bundle(
             P.T0000.ACO.AEXPU.Y{year}.D{date}.T{file_time}.xlsx  <- AEXPUProcessor
             [<notice> ...]                 <- optional FinRec notice file(s)
 
-    ``file_time_str`` defaults to the bundle's own T stamp.
+    ``file_time_str`` defaults to the bundle's own T stamp. ``with_aexpu=False``
+    leaves the AEXPU out, for a caller that writes its own.
     """
     bundle = raw_dir / aco / year / code / f"P.{aco}.ACO.STLMT.D{date_str}.T{time_str}"
     file_stamp = f"D{date_str}.T{file_time_str or time_str}"
@@ -189,9 +217,10 @@ def make_stlmt_bundle(
         bundle / f"P.{aco}.ACO.STLMT.Y{year}.{file_stamp}.xlsx",
         stlmt_sheets(with_table_a6),
     )
-    write_workbook(
-        bundle / f"P.{aco}.ACO.AEXPU.Y{year}.{file_stamp}.xlsx", aexpu_sheets(year)
-    )
+    if with_aexpu:
+        write_workbook(
+            bundle / f"P.{aco}.ACO.AEXPU.Y{year}.{file_stamp}.xlsx", aexpu_sheets(year)
+        )
     for name in notices:
         (bundle / name).write_bytes(b"%PDF-1.4 synthetic notice")
     return bundle
