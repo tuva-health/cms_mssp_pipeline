@@ -103,7 +103,7 @@ STLMT_TABLE_3 = [
     ["Shared Savings Program Shared Savings and Losses", None, None],
     ["Table of Contents", None, None],
     ["Shared Savings/Losses Calculation", "Performance Year", "Result"],
-    ["[A] Table 3 Section", None, None],
+    ["[U] Table 3 Section", None, None],
     ["Row Unique To Table 3", "3-0", "3-1"],
     ["Determine Savings", None, None],
     ["[A] Assigned Beneficiaries", "1000", "-"],

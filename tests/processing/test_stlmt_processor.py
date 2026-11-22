@@ -155,6 +155,26 @@ def test_another_workbook_carrying_the_token_is_skipped(
     ).fetchone()[0] == 1
 
 
+def test_a_filename_year_that_disagrees_with_the_directory_is_reported(
+    test_session, test_config, raw_dir, capsys
+):
+    """PERFORMANCE_YEAR follows the directory, as the settlement AEXPU's does.
+    A workbook whose 'Y<year>' names another year still loads, with a warning."""
+    write_workbook(
+        raw_dir / ACO_ID / "2026" / "01" / f"P.{ACO_ID}.ACO.STLMT.D259999.T1111111"
+        / f"P.{ACO_ID}.ACO.STLMT.Y2025.D259999.T1111111.xlsx",
+        stlmt_sheets(),
+    )
+    conn = run(STLMTProcessor, test_session, test_config)
+
+    assert "filename says performance year 2025 but it is filed under 2026" in (
+        capsys.readouterr().out
+    )
+    assert conn.execute(
+        "SELECT DISTINCT performance_year, period FROM raw_data.stlmt_table_3"
+    ).fetchall() == [("2026", "Y2025")]
+
+
 def test_missing_file_store_is_not_an_error(test_session, test_config, raw_dir):
     run(STLMTProcessor, test_session, test_config)
     assert counts(test_session.connection) == {}

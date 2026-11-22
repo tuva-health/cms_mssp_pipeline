@@ -5,10 +5,14 @@ from .aco_workbook import ACOWorkbookProcessor, _date_literal, _file_name, _varc
 from ..defs.sectioned_sheet_defs import SheetDef
 from ..defs.stlmt_file_defs import STLMT_SHEET_DEFS
 
+_FILENAME_TOKEN = ".STLMT.Y"
+
 # The financial reconciliation workbook is named
 # 'P.{ACO}.ACO.STLMT.Y<PY>.D<YYMMDD>.T<NNNNNNN>.xlsx': the year token runs
 # straight into the stamp. Anything else carrying '.STLMT.Y' is not it.
-_WORKBOOK_NAME_RE = re.compile(r"\.STLMT\.Y\d{4}\.D\d{6}\.T\d{7}\.xlsx$")
+_WORKBOOK_NAME_RE = re.compile(
+    rf"{re.escape(_FILENAME_TOKEN)}(\d{{4}})\.D\d{{6}}\.T\d{{7}}\.xlsx$"
+)
 
 
 class STLMTProcessor(ACOWorkbookProcessor):
@@ -31,19 +35,32 @@ class STLMTProcessor(ACOWorkbookProcessor):
     """
 
     SHEET_DEFS: List[SheetDef] = STLMT_SHEET_DEFS
-    FILENAME_TOKEN = ".STLMT.Y"
+    FILENAME_TOKEN = _FILENAME_TOKEN
 
     def _list_source_file_paths(self, file_def) -> List[Tuple[str, str]]:
-        """The base listing, narrowed to files named exactly like the workbook."""
+        """The base listing, narrowed to files named exactly like the workbook.
+
+        PERFORMANCE_YEAR comes from the directory layout, as it does for the
+        settlement AEXPU beside the workbook. A 'Y<year>' token that disagrees
+        with it is reported, not silently overridden.
+        """
         result = []
         for path_norm, path in super()._list_source_file_paths(file_def):
-            if not _WORKBOOK_NAME_RE.search(_file_name(path_norm)):
+            name_year = self._name_year(_file_name(path_norm))
+            if name_year is None:
                 print(
-                    f"  Warning: skipping {path_norm}: it carries the "
+                    f"  Warning: skipping {path_norm} — it carries the "
                     f"'{self.FILENAME_TOKEN}' token but is not named "
                     f"'...STLMT.Y<year>.D<YYMMDD>.T<NNNNNNN>.xlsx'."
                 )
                 continue
+            directory_year = self._performance_year(path_norm)
+            if directory_year != name_year:
+                print(
+                    f"  Warning: {path_norm} — its filename says performance "
+                    f"year {name_year} but it is filed under {directory_year}; "
+                    f"PERFORMANCE_YEAR follows the directory."
+                )
             result.append((path_norm, path))
         return result
 
@@ -54,15 +71,16 @@ class STLMTProcessor(ACOWorkbookProcessor):
         stamp = super()._settlement_stamp(path_norm)
         return stamp if stamp is not None else self._file_stamp(_file_name(path_norm))
 
-    def _performance_year_token(self, file_name: str) -> Optional[str]:
-        match = re.search(r"\.STLMT\.Y(\d{4})\.", file_name)
+    def _name_year(self, file_name: str) -> Optional[str]:
+        """The performance year the workbook's own 'Y<year>' token names."""
+        match = _WORKBOOK_NAME_RE.search(file_name)
         return match.group(1) if match else None
 
     def _file_metadata_sql(self, xlsx_path: str) -> Dict[str, str]:
         metadata = super()._file_metadata_sql(xlsx_path)
         file_name = _file_name(xlsx_path.replace("\\", "/"))
 
-        year = self._performance_year_token(file_name)
+        year = self._name_year(file_name)
         metadata["PERIOD"] = _varchar(f"Y{year}" if year else None)
         metadata["FILE_DATE"] = _date_literal(self._submission_date(file_name))
         return metadata
