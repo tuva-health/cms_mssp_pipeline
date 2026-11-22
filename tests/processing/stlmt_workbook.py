@@ -28,7 +28,7 @@ The A1 BY3 CMS-HCC scores are the e2e BNMRK final delivery's Table 1 [C] BY3
 
 from typing import Dict, List
 
-DASH = "–"  # CMS writes a blank value as an en dash, not a hyphen.
+DASH = "\u2013"  # CMS writes a blank value as an en dash, not a hyphen.
 TYPES = ("ESRD", "Disabled", "Aged/dual", "Aged/non-dual")
 TOC = "Table of Contents"
 
@@ -158,20 +158,47 @@ PARAMETERS = [
     ["This report is based on the PY 2025 ACO participant list.", None],
     ["Time Periods and ACO Characteristics", None],
     ["Performance Year for which ACO is Being Reconciled", "2025"],
+    ["CMS-HCC Risk Adjustment Model for ESRD Beneficiaries", "ESRD model"],
+    ["CMS-HCC Risk Adjustment Models for Non-ESRD Beneficiaries", "Non-ESRD model"],
+    ["Performance Year Corresponding to BY1", "2022"],
+    ["Performance Year Corresponding to BY2", "2023"],
+    ["Performance Year Corresponding to BY3", "2024"],
+    ["Claims Run-Out Period", "3 months"],
+    ["Claims Completion Factor", "1.0"],
+    ["Advance Investment Payment Recoupment Period", "Not applicable"],
+    ["Date Produced", "01/01/2026"],
+    ["ACO Track", "BASIC Level A"],
+    ["ACO Agreement Period", "1"],
+    ["ACO Agreement Period Subject to Regional Adjustment", "Yes"],
+    ["ACO Assignment Methodology", "Prospective"],
+    ["ACO High or Low Revenue", "Low Revenue"],
+    ["ACO Determined to Have Higher or Lower Spending than the ACO's Regional Service Area",
+     "Lower"],
+    ["Weight Applied to the ACPT in the Three-Way Blended Benchmark Update Factor", "0.333"],
+    # Most groups repeat the same benchmark-year keys: only the group tells
+    # them apart.
     ["Claims-Based Beneficiary Assignment Window", None],
+    *_BY_PY,
+    ["Window for which Step 3 Assignability is Determined", None],
+    *_BY_PY,
+    ["Voluntary Alignment End Date", None],
     *_BY_PY,
     ["Expenditure & Risk Score Period", None],
     *_BY_PY,
+    ["Performance Years from Prior Agreement Period(s) Used to Calculate Prior Savings "
+     "Adjustment, if Applicable", None],
+    ["Benchmark Year 1 (BY1)", "Not applicable"],
+    ["Prior ACO Used to Compute Prior Savings Adjustment (Re-Entering ACO Only)", None],
+    ["Benchmark Year 1 (BY1)", "Not applicable"],
     ["Benchmark Year Weights", None],
     ["Benchmark Year 1 (BY1)", "0.1"],
     ["Benchmark Year 2 (BY2)", "0.3"],
     ["Benchmark Year 3 (BY3)", "0.6"],
-    ["Claims Run-Out Period", "3 months"],
-    ["Date Produced", "01/01/2026"],
-    ["ACO Track", "BASIC Level A"],
-    ["ACO Agreement Period", "1"],
-    ["ACO Assignment Methodology", "Prospective"],
-    ["ACO High or Low Revenue", "Low Revenue"],
+    ["Weight Used in Regional Adjustment Calculation", None],
+    ["Benchmark Year 3 (BY3)", "0.15"],
+    ["Expenditure Truncation Threshold ($), CY 2025", None],
+    ["ESRD", "500000"],
+    ["Aged/Disabled", "100000"],
 ]
 
 # Table 1. Values sit in BY1-BY3 and/or Benchmark, by row; column E is the
@@ -209,6 +236,15 @@ TABLE_1 = [
     *_t1_types(_t1_by(lambda t, f: HISTORICAL_BENCHMARK[t] * f), _DASHES),
     ["[C] CMS-HCC Risk Score", None, None, None, None, None],
     *_t1_types(_t1_by(lambda t, f: BY3_RISK_SCORE[t] * f), _DASHES),
+    ["[D] CMS-HCC Risk Ratio", None, None, None, None, None],
+    *_t1_types(_t1_by(lambda t, f: 1 / f), _DASHES),
+    ["[E] National-Regional Blended Trend Factor ", None, None, None, None, None],
+    *_t1_types(_t1_by(lambda t, f: 1 / f), _DASHES),
+    ["[F] Trended Per Capita Expenditures ($) ", None, None, None, None, None],
+    *_t1_types(_t1_by(lambda t, f: HISTORICAL_BENCHMARK[t]), _DASHES),
+    ["[G] Historical Benchmark Expenditures Before Regional Adjustment, Prior Savings "
+     "Adjustment, or Population Adjustment ($)", None, None, None, None, None],
+    *_t1_types(_t1_by(lambda t, f: HISTORICAL_BENCHMARK[t]), _by_type(HISTORICAL_BENCHMARK.get)),
     ["[H] Assigned Beneficiary Proportions ", None, None, None, None, None],
     *_t1_types({"BY1": _DASHES, "BY2": _DASHES, "BY3": _by_type(PERSON_YEAR_SHARES.get)}, _DASHES),
     ["[I] Historical Benchmark Before Regional Adjustment, Prior Savings Adjustment, "
@@ -216,6 +252,8 @@ TABLE_1 = [
     ["Apply Regional Adjustment, Prior Savings Adjustment, or Population Adjustment, "
      "as Applicable", None, None, None, None, None],
     ["[J] Adjustment Applied to Benchmark ($)", DASH, DASH, DASH, None, "None"],
+    ["[K] Adjustment by Enrollment Type ($)", None, None, None, None, None],
+    *_t1_types(_DASH_BY, {t: "0" for t in TYPES}),
     ["[L] Historical Benchmark Expenditures After Applying Adjustment ($) ",
      None, None, None, None, None],
     *_t1_types(_DASH_BY, _by_type(HISTORICAL_BENCHMARK.get)),
@@ -223,17 +261,42 @@ TABLE_1 = [
      DASH, DASH, DASH, None, fmt(HISTORICAL_BENCHMARK_TOTAL)],
 ]
 
+def _1a_types(func) -> list:
+    """Table 1A per-type rows: BY3 dashed, column C the spacer, the value in D."""
+    return [[t, DASH, None, v] for t, v in _by_type(func).items()]
+
+
 TABLE_1A = [
     *_top("Table 1A:  Regional Adjustment Determination", 4),
     ["Regional Adjustment Calculation", "BY3", "Column1", "Regional Adjustment"],
     ["Determine Regional Adjustment Before Applying Cap or Offset Factor", None, None, None],
     ["[A] ACO Risk-Adjusted Regional Average Expenditure Amount ($) ", None, None, None],
-    *[[t, DASH, None, v] for t, v in _by_type(lambda t: HISTORICAL_BENCHMARK[t] * 1.01).items()],
+    *_1a_types(lambda t: HISTORICAL_BENCHMARK[t] * 1.01),
+    ["[B] Difference Between ACO Risk-Adjusted Regional Average Expenditure Amount and "
+     "Historical Benchmark ($)", None, None, None],
+    *_1a_types(lambda t: HISTORICAL_BENCHMARK[t] * 0.01),
     ["[C] Weighted Average Difference Between ACO Risk-Adjusted Regional Average "
      "Expenditure Amount and Historical Benchmark ($)", DASH, None, "130"],
     ["[D] Regional Adjustment Weight", DASH, None, "0.15"],
-    ["Determine Regional Adjustment", None, None, None],
+    ["[E] Regional Adjustment Before Applying Cap or Offset Factor ($) ", None, None, None],
+    *_1a_types(lambda t: 0),
+    ["Apply Cap to Regional Adjustment Amounts", None, None, None],
+    ["[F] Positive Regional Adjustment Cap ($)", None, None, None],
+    *_1a_types(lambda t: 1000),
+    ["[G] Negative Regional Adjustment Cap ($)", None, None, None],
+    *_1a_types(lambda t: -1000),
+    ["[H] Regional Adjustment After Applying Cap ($) ", None, None, None],
+    *_1a_types(lambda t: 0),
+    ["Reduce Negative Regional Adjustment Amounts by Offset Factor for Risk and Dual "
+     "Eligibility Status", None, None, None],
+    ["[I] Dollar Weights Used to Calculate Regional Adjustment Offset Factor", None, None, None],
+    *_1a_types(PERSON_YEAR_SHARES.get),
+    ["[J] Dollar Weighted Average CMS-HCC Risk Score", DASH, None, "0.85"],
     ["[K] Dual Eligible Person Years Across Enrollment Types", "1200", None, DASH],
+    ["[L] Regional Adjustment Offset Factor", DASH, None, "0"],
+    ["Determine Regional Adjustment", None, None, None],
+    ["[M] Regional Adjustment After Applying Cap and Offset Factor ($)", None, None, None],
+    *_1a_types(lambda t: 0),
     ["[N] Regional Adjustment Expressed as a Single Value ($)", DASH, None, "0"],
 ]
 
@@ -242,7 +305,9 @@ TABLE_1B = [
     ["Prior Savings Adjustment Calculation", "PY Corresponding to BY1",
      "PY Corresponding to BY2", "PY Corresponding to BY3", "Prior Savings Adjustment"],
     ["Determine Eligibility for Prior Savings Adjustment", None, None, None, None],
-    ["[A] Total Savings or Losses ($)  ", DASH, DASH, DASH, DASH],
+    ["[A] Total Savings or Losses ($)\u00a0\u00a0", DASH, DASH, DASH, DASH],
+    ["[B] Financial Reconciliation Person Years", DASH, DASH, DASH, DASH],
+    ["[C] Per Capita Prior Savings ", DASH, DASH, DASH, DASH],
     ["[D] ACO Eligible for Prior Savings Adjustment?", DASH, DASH, DASH, "No"],
     ["Apply Proration Factor to Account for Changes in Assigned Beneficiary "
      "Population Size", None, None, None, None],
@@ -252,7 +317,11 @@ TABLE_1B = [
     ["[F] Denominator of Proration Factor Based on BYs of Current Agreement Period",
      None, None, None, None],
     ["[G] Proration Factor", DASH, DASH, DASH, DASH],
+    ["[H] Prorated Average Per Capita Prior Savings ($)", DASH, DASH, DASH, DASH],
     ["Determine Prior Savings Adjustment", None, None, None, None],
+    ["[I] Prorated Average Per Capita Prior Savings with 50% Scaling Factor Applied ($)",
+     DASH, DASH, DASH, DASH],
+    ["[J] Cap on the Prior Savings Adjustment ($)", DASH, DASH, DASH, DASH],
     ["[K] Prior Savings Adjustment ($)", DASH, DASH, DASH, "Not applicable"],
 ]
 
@@ -263,7 +332,7 @@ TABLE_1C = [
     ["[A] ACO Proportion of Assigned Beneficiaries enrolled in Medicare Part D LIS "
      "or Dually Eligible", "0.2", DASH],
     ["[B] ACO Eligible for Population Adjustment?", DASH, "No"],
-    ["Determine Population Adjustment ", None, None],
+    ["Determine Population Adjustment\u00a0", None, None],
     ["[C] Population Adjustment Scaler ($) ", DASH, "0"],
     ["[D] Population Adjustment ($)", DASH, "0"],
 ]
@@ -381,14 +450,14 @@ TABLE_3 = _table_3()
 
 # Table A1: the letters label the columns. (code, header label)
 A1_COLUMNS = [
-    ("A", "Risk Score Weights ​\n[A]"),
+    ("A", "Risk Score Weights\u00a0\u200b\n[A]"),
     ("B", "BY3 CMS-HCC Risk Score\n[B]"),
     ("C", "PY CMS-HCC Risk Score\n[C]"),
     ("D", "CMS-HCC Risk Ratio (Uncapped)\n[D]"),
     ("E", "BY3 Demographic Risk Score\n[E]"),
     ("F", "PY Demographic Risk Score\n[F]"),
-    ("G", "Demographic Risk Ratio ​\n[G]"),
-    ("H", "Aggregate Cap ​\n[H]"),
+    ("G", "Demographic Risk Ratio\u00a0\u200b\n[G]"),
+    ("H", "Aggregate Cap\u00a0\u200b\n[H]"),
     ("I", "Final Risk Ratio (Capped)\n[I]"),
 ]
 A1_VALUES = {
@@ -445,6 +514,16 @@ TABLE_A3 = [
     [None, "BY1", "BY2", "BY3", None, "PY"],
     ["[A] OACT National Assignable FFS Per Capita Expenditures ($)", None, None, None, None, None],
     *_a3_types(lambda t: HISTORICAL_BENCHMARK[t]),
+    ["[B] National Expenditure Trend and Update Factors ", None, None, None, None, None],
+    *_a3_types(lambda t: BLENDED_UPDATE[t] + 0.005),
+    ["[C] Risk-Adjusted Regional Expenditures ($)", None, None, None, None, None],
+    *_a3_types(lambda t: HISTORICAL_BENCHMARK[t] * 1.01),
+    ["[D] Regional Expenditure Trend and Update Factors ", None, None, None, None, None],
+    *_a3_types(lambda t: BLENDED_UPDATE[t] - 0.005),
+    ["[E] National Component Weight", None, None, None, None, None],
+    *_a3_types(lambda t: 0.5),
+    ["[F] Regional Component Weight", None, None, None, None, None],
+    *_a3_types(lambda t: 0.5),
     ["[G] National-Regional Blended Trend Factors and Update Factors", None, None, None, None, None],
     *_a3_types(BLENDED_UPDATE.get),
     ["[H] ACO-Specific ACPT Update Factors", None, None, None, None, None],
@@ -464,7 +543,7 @@ TABLE_A4 = [
      "Assigned Beneficiaries", None, None, None],
     [TOC, None, None, None],
     ["Overview", None, None, None],
-    ["For all one-sided ACOs, and for two-sided ACOs selecting this option, the ACO’s "
+    ["For all one-sided ACOs, and for two-sided ACOs selecting this option, the ACO\u2019s "
      "MSR varies based on the number of assigned beneficiaries.", None, None, None],
     _blank_row(4),
     ["Number of Assigned Beneficiaries Range: \nLow", "Number of Assigned Beneficiaries Range: \nHigh",
@@ -496,17 +575,31 @@ def _a6_rows(types) -> list:
     return [[f"      {t}", DASH, "1.03", "1.06", "1.09", "1.12", "1.15"] for t in types]
 
 
+_A6_TWO = ("ESRD", "Aged/Disabled")  # [A]-[G] split only ESRD from the rest
+
+
+def _a6_block(code: str, label: str, types) -> list:
+    return [[f"[{code}] {label}", None, None, None, None, None, None], *_a6_rows(types)]
+
+
 TABLE_A6 = [
     *_top("Table A6: Accountable Care Prospective Trend (ACPT) Component of the Three-Way "
           "Blended Benchmark Update Factor", 7),
     [None, None, "Performance Year", None, None, None, None],
     ["ACPT Calculation ", *_PY_COLS],
-    ["[A] Modified USPCC Annualized Growth Rates", None, None, None, None, None, None],
-    *_a6_rows(("ESRD", "Aged/Disabled")),
-    ["[B] Cumulative Modified USPCC Growth Rates", None, None, None, None, None, None],
-    *_a6_rows(("ESRD", "Aged/Disabled")),
-    ["[K] ACPT", None, None, None, None, None, None],
-    *_a6_rows(TYPES),
+    *_a6_block("A", "Modified USPCC Annualized Growth Rates", _A6_TWO),
+    *_a6_block("B", "Cumulative Modified USPCC Growth Rates", _A6_TWO),
+    *_a6_block("C", "Observed Annual Growth in National Assignable Expenditures", _A6_TWO),
+    *_a6_block("D", "Observed Cumulative Growth in National Assignable Expenditures", _A6_TWO),
+    *_a6_block("E", "Delta Modified USPCC", _A6_TWO),
+    *_a6_block("F", "Does the Modified USPCC Guardrail Apply?", _A6_TWO),
+    *_a6_block("G", "Guardrail-Adjusted Cumulative Modified USPCC Growth Rates (If Applicable)",
+               _A6_TWO),
+    *_a6_block("H", "OACT Truncated National Assignable FFS Per Capita Expenditures for BY3 ($)",
+               TYPES),
+    *_a6_block("I", "Flat Dollar Amount ($)", TYPES),
+    *_a6_block("J", "ACO Risk-Adjusted Flat Dollar Amount ($)", TYPES),
+    *_a6_block("K", "ACPT", TYPES),
 ]
 
 # table -> (real sheet name, rows)

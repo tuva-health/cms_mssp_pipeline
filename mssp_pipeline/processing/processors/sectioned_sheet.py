@@ -1,6 +1,6 @@
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 import duckdb
 
@@ -71,14 +71,23 @@ _LAYOUT_OUTPUT_COLUMNS: List[Tuple[str, str]] = [
 _PY_COLUMN_CODE_RE = re.compile(r"^(.*\S)\s*\[([A-Z]{1,2})\]$")
 
 
+class _ValueColumn(NamedTuple):
+    """One value column of the unpivot: source column and its header labels."""
+
+    source: str
+    group: Optional[str]
+    label: str
+    code: Optional[str]
+
+
 @dataclass(frozen=True)
 class _SheetLayout:
     """Per-sheet facts the layout-aware SELECT needs, read from the header."""
 
     # Column A's header label when column A is data (SheetDef.label_column_is_data).
     label_column_header: Optional[str] = None
-    # SheetDef.blocks: the first block's title, and the cells of a header row,
-    # [(column, normalized label)], so a repeat of it can be recognised.
+    # SheetDef.blocks: the first block's title, and every cell of the header
+    # row, [(column, normalized text)], so a repeat of it can be recognised.
     first_block_label: Optional[str] = None
     header_cells: Tuple[Tuple[str, Optional[str]], ...] = ()
 
@@ -368,7 +377,9 @@ class SectionedSheetProcessor(FileProcessor):
         label_col = columns[0] if columns else "A"
         value_cols = columns[1:]
 
+        self._check_layout_options(file_def)
         skip_notes_scan = False
+        layout = _SheetLayout()
         if file_def.synthetic_column_labels is not None:
             retained = _synthetic_header(value_cols, file_def.synthetic_column_labels)
             if not retained:
@@ -400,14 +411,9 @@ class SectionedSheetProcessor(FileProcessor):
                 raise self._no_header_error(file_def, xlsx_path, exact_sheet)
 
             last_header_row = header_row + 1 if continuation is not None else header_row
-            layout = self._sheet_layout(
-                raw, label_col, value_cols, primary, header_row, file_def
-            )
+            layout = self._sheet_layout(raw, label_col, header_row, file_def)
             if layout.label_column_header is not None:
                 retained = [(label_col, None, layout.label_column_header), *retained]
-
-        if file_def.synthetic_column_labels is not None:
-            layout = _SheetLayout()
 
         notes_row = None
         if not file_def.include_notes and not skip_notes_scan:
@@ -418,21 +424,30 @@ class SectionedSheetProcessor(FileProcessor):
             xlsx_path, layout,
         )
 
+    def _check_layout_options(self, file_def: SheetDef) -> None:
+        """The settlement layout options need the layout columns: without them
+        BLOCK_LABEL does not exist and the options would only half-apply."""
+        options = [
+            name for name in ("heading_cells_are_labels", "blocks", "label_column_is_data")
+            if getattr(file_def, name)
+        ]
+        if options and not self.LAYOUT_COLUMNS:
+            raise RuntimeError(
+                f"{file_def.table_name}: {', '.join(options)} needs a processor "
+                f"with LAYOUT_COLUMNS = True"
+            )
+
     def _sheet_layout(
-        self,
-        raw: str,
-        label_col: str,
-        value_cols: List[str],
-        primary: Sequence[Optional[str]],
-        header_row: int,
-        file_def: SheetDef,
+        self, raw: str, label_col: str, header_row: int, file_def: SheetDef
     ) -> _SheetLayout:
         """Read what label_column_is_data and blocks need from the header."""
         if not (file_def.label_column_is_data or file_def.blocks):
             return _SheetLayout()
 
+        conn = self.session.connection
+
         def column_a(row_num: int) -> Optional[str]:
-            row = self.session.connection.execute(
+            row = conn.execute(
                 f"SELECT {label_col} FROM {raw} WHERE ROW_NUM = {int(row_num)}"
             ).fetchone()
             return _header_label(row[0]) if row else None
@@ -445,9 +460,24 @@ class SectionedSheetProcessor(FileProcessor):
                     f"label in column A of row {header_row}"
                 )
             return _SheetLayout(label_column_header=header_a)
+
+        title = column_a(header_row - 1) if header_row > 1 else None
+        if title is None:
+            raise RuntimeError(
+                f"{file_def.table_name}: blocks needs the first block's title in "
+                f"column A of the row directly above the header (row {header_row})"
+            )
+        # Every cell of the header row as normalized text, an Excel 'Column<n>'
+        # placeholder included, since the SQL repeat check sees it that way.
+        columns = [r[0] for r in conn.execute(f"DESCRIBE {raw}").fetchall() if r[0] != "ROW_NUM"]
+        cells = conn.execute(
+            f"SELECT {', '.join(columns)} FROM {raw} WHERE ROW_NUM = {int(header_row)}"
+        ).fetchone()
         return _SheetLayout(
-            first_block_label=column_a(header_row - 1) if header_row > 1 else None,
-            header_cells=((label_col, header_a), *zip(value_cols, primary)),
+            first_block_label=title,
+            header_cells=tuple(
+                (col, _normalize_label(cell)) for col, cell in zip(columns, cells)
+            ),
         )
 
     def _no_header_error(
@@ -565,7 +595,7 @@ class SectionedSheetProcessor(FileProcessor):
         notes_row: Optional[int],
         file_def: SheetDef,
         xlsx_path: str,
-        layout: "_SheetLayout",
+        layout: _SheetLayout,
     ) -> str:
         """Classify, forward-fill the two-level hierarchy, then unpivot.
 
@@ -612,13 +642,16 @@ class SectionedSheetProcessor(FileProcessor):
         )
 
         columns = [
-            (col, group, *(_split_column_code(label) if self.LAYOUT_COLUMNS else (label, None)))
+            _ValueColumn(
+                col, group,
+                *(_split_column_code(label) if self.LAYOUT_COLUMNS else (label, None)),
+            )
             for col, group, label in retained
         ]
-        column_groups = ", ".join(_varchar_literal(c[1]) for c in columns)
-        column_labels = ", ".join(_varchar_literal(c[2]) for c in columns)
-        column_codes = ", ".join(_varchar_literal(c[3]) for c in columns)
-        value_exprs = ", ".join(f"CAST({c[0]} AS VARCHAR)" for c in columns)
+        column_groups = ", ".join(_varchar_literal(c.group) for c in columns)
+        column_labels = ", ".join(_varchar_literal(c.label) for c in columns)
+        column_codes = ", ".join(_varchar_literal(c.code) for c in columns)
+        value_exprs = ", ".join(f"CAST({c.source} AS VARCHAR)" for c in columns)
 
         # A bracketed row whose remainder is empty ("[A2]") still deserves a label.
         bracket_label = "COALESCE(_rest_norm, _code)"

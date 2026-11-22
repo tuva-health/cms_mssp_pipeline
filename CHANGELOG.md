@@ -22,7 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   column A. Excel's `Column1` spacer columns and U+200B in labels are gone,
   and Table 1B's blank lettered rows load with NULL cells. cms_mssp_connector's
   settlement models need rebuilding on this shape (TUVA-168). The STLMT
-  tables have not been released, so there is no upgrade step.
+  tables have not been released, so there is no upgrade step, and the
+  contract takes a minor bump rather than a major one: no released relation
+  changes shape.
 
 - The final settlement (financial reconciliation) workbook,
   `P.{ACO}.ACO.STLMT.Y{PY}.D…T….xlsx`, now loads (TUVA-158). Its `Table *`

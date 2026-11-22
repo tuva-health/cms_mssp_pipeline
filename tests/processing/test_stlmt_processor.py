@@ -305,7 +305,7 @@ def test_a_settlement_workbook_outside_a_settlement_bundle_keeps_its_identity(
 # The real layout, through the layout grammar (TUVA-167)
 # ===========================================================================
 
-DASH = "–"
+DASH = "\u2013"
 
 # Table 3's codes, in sheet order, from the CMS template.
 TABLE_3_CODES = [
@@ -320,6 +320,33 @@ def _rows(conn, table, where="TRUE", columns="*"):
     return conn.execute(
         f"SELECT {columns} FROM raw_data.{table} WHERE {where} ORDER BY row_num, column_label"
     ).fetchall()
+
+
+def _letters(last: str) -> list:
+    return [chr(c) for c in range(ord("A"), ord(last) + 1)]
+
+
+# Each lettered sheet's codes, in sheet order, from the CMS template.
+TEMPLATE_CODES = {
+    "stlmt_table_1": ["A1", "A2", *_letters("M")[1:]],
+    "stlmt_table_1a": _letters("N"),
+    "stlmt_table_1b": _letters("K"),
+    "stlmt_table_1c": _letters("D"),
+    "stlmt_table_2": _letters("I"),
+    "stlmt_table_3": TABLE_3_CODES,
+    "stlmt_table_a3": _letters("I"),
+    "stlmt_table_a6": _letters("K"),
+}
+
+
+@pytest.mark.parametrize("table", sorted(TEMPLATE_CODES))
+def test_every_template_code_loads(stlmt, table):
+    assert [
+        r[0] for r in stlmt.execute(
+            f"SELECT section_code FROM raw_data.{table} "
+            "GROUP BY section_code ORDER BY MIN(row_num)"
+        ).fetchall()
+    ] == TEMPLATE_CODES[table]
 
 
 def test_table_3_loads_every_code_in_one_value_column(stlmt):
@@ -453,9 +480,18 @@ def test_parameters_tell_repeated_keys_apart_by_group(stlmt):
         "WHERE row_label = 'Benchmark Year 3 (BY3)' ORDER BY row_num"
     ).fetchall() == [
         ("Claims-Based Beneficiary Assignment Window", "01/01/2024 - 12/31/2024"),
+        ("Window for which Step 3 Assignability is Determined", "01/01/2024 - 12/31/2024"),
+        ("Voluntary Alignment End Date", "01/01/2024 - 12/31/2024"),
         ("Expenditure & Risk Score Period", "01/01/2024 - 12/31/2024"),
         ("Benchmark Year Weights", "0.6"),
+        ("Weight Used in Regional Adjustment Calculation", "0.15"),
     ]
+    # Keys repeat; a key and its group never do.
+    assert stlmt.execute(
+        "SELECT COUNT(*) > COUNT(DISTINCT row_label), "
+        "COUNT(*) = COUNT(DISTINCT (group_label, row_label)) "
+        "FROM raw_data.stlmt_parameters"
+    ).fetchone() == (True, True)
     assert stlmt.execute(
         "SELECT value_text FROM raw_data.stlmt_parameters WHERE row_label = 'ACO Track'"
     ).fetchone()[0] == "BASIC Level A"

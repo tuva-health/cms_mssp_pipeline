@@ -1319,8 +1319,8 @@ def test_zero_width_spaces_are_removed_from_labels(test_session, tmp_path):
     """CMS header and row labels can carry U+200B next to real whitespace."""
     sheet = [
         ["Table 1", None, None],
-        ["Calculation", "Risk Score ​\nWeights", "BY​3"],
-        ["ESRD​", "1", "2"],
+        ["Calculation", "Risk Score\u00a0\u200b\nWeights", "BY\u200b3"],
+        ["ESRD\u200b", "1", "2"],
     ]
     path = make_xlsx(tmp_path, {"Table 1 - Benchmark": sheet})
     conn = run_processor(test_session, defs_for(), [path])
@@ -1395,10 +1395,10 @@ _COLUMN_CODED_SHEET = [
     ["Table A1: Risk Ratios", None, None, None],
     ["Table of Contents", None, None, None],
     [None, None, None, None],
-    ["Medicare Enrollment Type", "Risk Score Weights ​\n[A]",
+    ["Medicare Enrollment Type", "Risk Score Weights\u00a0\u200b\n[A]",
      "BY3 CMS-HCC Risk Score\n[B]", "Final Risk Ratio (Capped)\n[I]"],
     ["ESRD", "0.1", "1.2", "1.01"],
-    ["Weighted Average ", "–", "–", "1.0"],
+    ["Weighted Average ", "\u2013", "\u2013", "1.0"],
 ]
 
 
@@ -1412,7 +1412,7 @@ def test_a_column_code_is_split_off_its_header_label(test_session, tmp_path):
         (None, None, "ESRD", "DETAIL", "A", "Risk Score Weights", "0.1"),
     ]
     # The weighted-average row is data, its blanks the en dash verbatim.
-    assert ("Weighted Average", "–") in {
+    assert ("Weighted Average", "\u2013") in {
         (row, value) for _, _, row, _, _, _, value in _layout_cells(conn)
     }
 
@@ -1436,13 +1436,13 @@ _SUBHEADED_SHEET = [
     ["Updated Benchmark Determination", None, None, None],
     ["[A] Historical Benchmark Expenditures After Applying Adjustment",
      "3-Year Average Benchmark", None, None],
-    ["ESRD", "90000", None, "–"],
-    ["Historical Benchmark Expenditures After Applying Adjustment", "12000", None, "–"],
+    ["ESRD", "90000", None, "\u2013"],
+    ["Historical Benchmark Expenditures After Applying Adjustment", "12000", None, "\u2013"],
     ["[B] ACO CMS-HCC Risk Score ", "BY3", None, None],
     ["ESRD", "1.1", None, "1.2"],
     ["[C] ACO CMS-HCC Risk Ratio (Capped)", None, None, None],
-    ["ESRD", "–", None, "1.01"],
-    ["[I] Updated Benchmark ($) ", "–", None, "13000"],
+    ["ESRD", "\u2013", None, "1.01"],
+    ["[I] Updated Benchmark ($) ", "\u2013", None, "13000"],
 ]
 
 
@@ -1459,16 +1459,16 @@ def test_row_kind_tells_code_detail_and_total_rows_apart(test_session, tmp_path)
         "FROM raw_data.sheet_table ORDER BY row_num, column_label"
     ).fetchall() == [
         ("A", "ESRD", "DETAIL", "Benchmark Period", "90000"),
-        ("A", "ESRD", "DETAIL", "Performance Year", "–"),
+        ("A", "ESRD", "DETAIL", "Performance Year", "\u2013"),
         ("A", "Historical Benchmark Expenditures After Applying Adjustment", "TOTAL",
          "Benchmark Period", "12000"),
         ("A", "Historical Benchmark Expenditures After Applying Adjustment", "TOTAL",
-         "Performance Year", "–"),
+         "Performance Year", "\u2013"),
         ("B", "ESRD", "DETAIL", "Benchmark Period", "1.1"),
         ("B", "ESRD", "DETAIL", "Performance Year", "1.2"),
-        ("C", "ESRD", "DETAIL", "Benchmark Period", "–"),
+        ("C", "ESRD", "DETAIL", "Benchmark Period", "\u2013"),
         ("C", "ESRD", "DETAIL", "Performance Year", "1.01"),
-        ("I", "Updated Benchmark ($)", "CODE", "Benchmark Period", "–"),
+        ("I", "Updated Benchmark ($)", "CODE", "Benchmark Period", "\u2013"),
         ("I", "Updated Benchmark ($)", "CODE", "Performance Year", "13000"),
     ]
 
@@ -1480,7 +1480,7 @@ def test_a_heading_row_keeps_real_values_unless_its_cells_are_labels(test_sessio
         ["Table 1", None, None],
         ["Calculate Historical Benchmark", "BY1", "BY3"],
         ["[A2] Person Years", "900", "950"],
-        ["ESRD", "–", "20"],
+        ["ESRD", "\u2013", "20"],
     ]
     path = make_xlsx(tmp_path, {"Table 1 - Benchmark": sheet})
     conn = run_layout(test_session, defs_for(), [path])
@@ -1491,7 +1491,7 @@ def test_a_heading_row_keeps_real_values_unless_its_cells_are_labels(test_sessio
     ).fetchall() == [
         ("Person Years", "CODE", "BY1", "900"),
         ("Person Years", "CODE", "BY3", "950"),
-        ("ESRD", "DETAIL", "BY1", "–"),
+        ("ESRD", "DETAIL", "BY1", "\u2013"),
         ("ESRD", "DETAIL", "BY3", "20"),
     ]
 
@@ -1506,9 +1506,9 @@ def test_a_blank_lettered_row_is_kept_when_it_heads_nothing(test_session, tmp_pa
         ["Apply Proration Factor", None, None],
         ["[E] Numerator of Proration Factor", None, None],
         ["[F] Denominator of Proration Factor", None, None],
-        ["[G] Proration Factor", "–", "–"],
+        ["[G] Proration Factor", "\u2013", "\u2013"],
         ["[K] Adjustment by Enrollment Type ($)", None, None],
-        ["ESRD", "–", "5"],
+        ["ESRD", "\u2013", "5"],
     ]
     path = make_xlsx(tmp_path, {"Table 1B - Prior Savings Adj": sheet})
     conn = run_layout(test_session, defs_for(pattern="Table 1B - %"), [path])
@@ -1591,3 +1591,43 @@ def test_a_grid_keeps_column_a_as_data(test_session, tmp_path):
     assert conn.execute(
         "SELECT COUNT(DISTINCT row_label), COUNT(*) FROM raw_data.sheet_table"
     ).fetchone() == (2, 8)
+
+
+def test_a_repeated_header_with_a_spacer_column_is_still_dropped(test_session, tmp_path):
+    """Excel names a blank table header 'Column1'; the repeat check must see
+    the same raw header the sheet repeats, spacer and all."""
+    sheet = [
+        ["Table A2", None, None, None],
+        ["Block one", None, None, None],
+        ["Medicare Enrollment Type", "BY3", "Column1", "PY"],
+        ["ESRD", "1.05", None, "1.06"],
+        ["Block two", None, None, None],
+        ["Medicare Enrollment Type", "BY3", "Column1", "PY"],
+        ["ESRD", "1.01", None, "1.02"],
+    ]
+    path = make_xlsx(tmp_path, {"Table A2 - Renormalization": sheet})
+    conn = run_layout(test_session, defs_for(pattern="Table A2 - %", blocks=True), [path])
+
+    assert conn.execute(
+        "SELECT block_label, row_label, COUNT(*) FROM raw_data.sheet_table "
+        "GROUP BY ALL ORDER BY MIN(row_num)"
+    ).fetchall() == [("Block one", "ESRD", 2), ("Block two", "ESRD", 2)]
+
+
+def test_a_block_sheet_without_a_title_above_its_header_fails(test_session, tmp_path):
+    sheet = [["Table A2", None, None], [None, None, None],
+             ["Medicare Enrollment Type", "BY3", "PY"], ["ESRD", "1", "2"]]
+    path = make_xlsx(tmp_path, {"Table A2 - Renormalization": sheet})
+    with pytest.raises(RuntimeError, match="blocks"):
+        run_layout(test_session, defs_for(pattern="Table A2 - %", blocks=True), [path])
+
+
+@pytest.mark.parametrize(
+    "option", ["blocks", "label_column_is_data", "heading_cells_are_labels"]
+)
+def test_a_layout_option_needs_a_layout_processor(test_session, tmp_path, option):
+    """The options only make sense with the layout columns; set on a plain
+    processor they fail loudly rather than half-apply."""
+    path = make_xlsx(tmp_path, {"Table 1 - Benchmark": BASIC_SHEET})
+    with pytest.raises(RuntimeError, match="LAYOUT_COLUMNS"):
+        run_processor(test_session, defs_for(**{option: True}), [path])

@@ -145,6 +145,15 @@ def test_stlmt_relations_use_the_layout_schema(contract):
     for r in contract["relations"]:
         expected = "stlmt_cell_grain" if r["family"] == "STLMT" else "cell_grain"
         assert r["schema"] == expected, r["relation"]
+    # The shared columns are declared twice; they must not drift. Only
+    # column_label's description differs, because it loses its column code.
+    cell_defs = {c["name"]: c for c in contract["schemas"]["cell_grain"]["columns"]}
+    for c in contract["schemas"]["stlmt_cell_grain"]["columns"]:
+        if c["name"] in cell_defs:
+            keys = {"name", "type", "role", "nullable"} | (
+                set() if c["name"] == "column_label" else {"description"}
+            )
+            assert {k: c[k] for k in keys} == {k: cell_defs[c["name"]][k] for k in keys}, c["name"]
 
 
 def test_accepted_output_set_is_all_thirty_three_relations(contract):
