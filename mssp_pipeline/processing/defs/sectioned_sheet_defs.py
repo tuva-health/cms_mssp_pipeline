@@ -19,6 +19,10 @@ class SheetDef:
     table_name: str                     # e.g. "BNMRK_TABLE_1"
     sheet_pattern: str                  # SQL LIKE pattern, e.g. "Table 1 - Historical%"
     header_row_hint: int | None = None  # 1-based override when auto-detection fails
+    # Labelled cells beyond column A that make a row the header. 2 skips the
+    # single-cell decorative row some sheets carry above their header; a sheet
+    # with only one value column (settlement Table 3) needs 1.
+    min_header_cells: int = 2
     include_notes: bool = False         # keep footnote/notes rows instead of dropping them
 
     # A sheet some conforming deliveries legitimately lack (BNMRK 'Table 6 -

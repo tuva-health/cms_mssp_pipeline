@@ -1287,3 +1287,60 @@ def test_a_missing_required_sheet_fails_the_run(test_session, tmp_path):
         run_processor(test_session, defs_for(pattern="Table 9 - %"), [path])
     assert "report.xlsx" in str(excinfo.value)
     assert "required" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# Real settlement-workbook header shapes (TUVA-167)
+# ---------------------------------------------------------------------------
+
+
+def test_a_sheet_with_one_value_column_finds_its_header(test_session, tmp_path):
+    """Settlement Table 3 has one value column, so its header row has one
+    labelled cell beyond column A, and a blank column A. Its SheetDef says so."""
+    sheet = [
+        ["Table 3: Shared Savings/Losses Calculation", None],
+        ["Table of Contents", None],
+        [None, None],
+        [None, "Performance Year"],
+        ["Total Savings/Losses Calculation", None],
+        ["[A] Assigned Beneficiaries", "1000"],
+    ]
+    path = make_xlsx(tmp_path, {"Table 3 - Shared Savings Losses": sheet})
+    conn = run_processor(
+        test_session, defs_for(pattern="Table 3 - %", min_header_cells=1), [path]
+    )
+
+    assert conn.execute(
+        "SELECT section_code, column_label, value_text FROM raw_data.sheet_table"
+    ).fetchall() == [("A", "Performance Year", "1000")]
+
+
+def test_zero_width_spaces_are_removed_from_labels(test_session, tmp_path):
+    """CMS header and row labels can carry U+200B next to real whitespace."""
+    sheet = [
+        ["Table 1", None, None],
+        ["Calculation", "Risk Score ​\nWeights", "BY​3"],
+        ["ESRD​", "1", "2"],
+    ]
+    path = make_xlsx(tmp_path, {"Table 1 - Benchmark": sheet})
+    conn = run_processor(test_session, defs_for(), [path])
+
+    assert conn.execute(
+        "SELECT row_label, column_label FROM raw_data.sheet_table ORDER BY row_num, column_label"
+    ).fetchall() == [("ESRD", "BY3"), ("ESRD", "Risk Score Weights")]
+
+
+def test_an_excel_table_placeholder_header_is_a_blank_header(test_session, tmp_path):
+    """An Excel table (ListObject) names a blank header cell 'Column1'. That
+    spacer column is excluded, like any column with a blank header."""
+    sheet = [
+        ["Table 1", None, None, None],
+        ["Calculate Historical Benchmark", "BY3", "Column1", "Benchmark"],
+        ["[I] Historical Benchmark ($)", "-", None, "13000"],
+    ]
+    path = make_xlsx(tmp_path, {"Table 1 - Benchmark": sheet})
+    conn = run_processor(test_session, defs_for(), [path])
+
+    assert conn.execute(
+        "SELECT DISTINCT column_label FROM raw_data.sheet_table ORDER BY 1"
+    ).fetchall() == [("BY3",), ("Benchmark",)]

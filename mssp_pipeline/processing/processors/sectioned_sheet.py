@@ -19,11 +19,22 @@ _FOOTNOTE_SUFFIX_RE = r"\[\d+\]\s*$"
 # spelled out; CMS headers also carry embedded newlines and tabs.
 _WHITESPACE_RE = "[\\s\u00a0]+"
 
+# Zero-width characters, removed outright before whitespace is collapsed. The
+# settlement workbook's headers carry U+200B beside real whitespace
+# ('Risk Score Weights\u00a0\u200b\n[A]'); turning it into a space would split
+# a word wherever it sits inside one.
+_ZERO_WIDTH_RE = "[\u200b\u200c\u200d\ufeff]"
+
 # A footnote *definition* row, e.g. '[10]See "Parameters" tab for details.'
 _FOOTNOTE_ROW_RE = r"^\s*\[\d+\]"
 
+# The name Excel gives a blank header cell of a table (ListObject): 'Column1',
+# 'Column2', ... It labels a spacer column, not data.
+_PY_PLACEHOLDER_HEADER_RE = re.compile(r"Column\d+")
+
 _PY_FOOTNOTE_SUFFIX_RE = re.compile(_FOOTNOTE_SUFFIX_RE)
 _PY_WHITESPACE_RE = re.compile(_WHITESPACE_RE)
+_PY_ZERO_WIDTH_RE = re.compile(_ZERO_WIDTH_RE)
 
 # Grammar columns emitted ahead of the file metadata, with the types the real
 # query produces. Used to synthesise an empty result for a batch that
@@ -360,7 +371,10 @@ class SectionedSheetProcessor(FileProcessor):
                 f"carrying column labels"
             )
         else:
-            detail = "need a row with 2+ non-blank cells beyond column A, or set header_row_hint"
+            detail = (
+                f"need a row with {file_def.min_header_cells}+ non-blank cells "
+                f"beyond column A, or set header_row_hint"
+            )
         return RuntimeError(
             f"No header row found in sheet {exact_sheet!r} of {xlsx_path} "
             f"for {file_def.table_name} ({detail})"
@@ -373,6 +387,10 @@ class SectionedSheetProcessor(FileProcessor):
 
         The >= 2 threshold matters: BNMRK "Table 6 - ACPT" carries a decorative
         row above the real header holding a single cell ("Performance Year").
+        A sheet with only one value column (settlement Table 3) cannot have two;
+        its SheetDef lowers min_header_cells to 1. That is opt-in, never inferred
+        from the column count: a key/value sheet has one value column too, and
+        its first value would be taken for a header.
         Returns None when no header row exists — including when header_row_hint
         falls outside the sheet — so the caller raises one consistent error.
         """
@@ -387,20 +405,25 @@ class SectionedSheetProcessor(FileProcessor):
 
         non_blank_count = " + ".join(_non_blank_flag(col) for col in value_cols)
         row = conn.execute(
-            f"SELECT MIN(ROW_NUM) FROM {raw} WHERE ({non_blank_count}) >= 2"
+            f"SELECT MIN(ROW_NUM) FROM {raw} "
+            f"WHERE ({non_blank_count}) >= {int(file_def.min_header_cells)}"
         ).fetchone()
         return int(row[0]) if row and row[0] is not None else None
 
     def _row_labels(
         self, raw: str, value_cols: List[str], row_num: int
     ) -> List[Optional[str]]:
-        """Normalized value-column cells of one row (None where blank/missing)."""
+        """Normalized header labels of one row (None where blank/missing).
+
+        Only header rows are read through here, so an Excel table's 'Column<n>'
+        placeholder counts as blank too.
+        """
         values = self.session.connection.execute(
             f"SELECT {', '.join(value_cols)} FROM {raw} WHERE ROW_NUM = {int(row_num)}"
         ).fetchone()
         if values is None:
             return [None] * len(value_cols)
-        return [_normalize_label(value) for value in values]
+        return [_header_label(value) for value in values]
 
     def _continuation_labels(
         self,
@@ -608,15 +631,19 @@ def _merge_header_rows(
 def _normalized(expr: str) -> str:
     """SQL expression implementing rule 5, applied to labels only — never values.
 
-    Collapse every run of whitespace to a single space, trim, strip a trailing
-    '[n]' footnote marker, trim again, and yield NULL when nothing is left.
+    Remove zero-width characters, collapse every run of whitespace to a single
+    space, trim, strip a trailing '[n]' footnote marker, trim again, and yield
+    NULL when nothing is left.
     Collapsing first is what makes 'With Prior 3-Day  Hospital Stay' joinable
     downstream, and it also lets the plain TRIM below strip leading tabs and
     newlines that DuckDB's TRIM would otherwise leave in place.
     """
-    collapsed = (
+    visible = (
         f"REGEXP_REPLACE(CAST({expr} AS VARCHAR), "
-        f"{sql_string_literal(_WHITESPACE_RE)}, ' ', 'g')"
+        f"{sql_string_literal(_ZERO_WIDTH_RE)}, '', 'g')"
+    )
+    collapsed = (
+        f"REGEXP_REPLACE({visible}, {sql_string_literal(_WHITESPACE_RE)}, ' ', 'g')"
     )
     return (
         f"NULLIF(TRIM(REGEXP_REPLACE(TRIM({collapsed}), "
@@ -632,9 +659,18 @@ def _normalize_label(value) -> Optional[str]:
     """
     if value is None:
         return None
-    text = _PY_WHITESPACE_RE.sub(" ", str(value)).strip()
+    text = _PY_ZERO_WIDTH_RE.sub("", str(value))
+    text = _PY_WHITESPACE_RE.sub(" ", text).strip()
     text = _PY_FOOTNOTE_SUFFIX_RE.sub("", text).strip()
     return text or None
+
+
+def _header_label(value) -> Optional[str]:
+    """A normalized header cell, with Excel's 'Column<n>' placeholder as blank."""
+    label = _normalize_label(value)
+    if label is not None and _PY_PLACEHOLDER_HEADER_RE.fullmatch(label):
+        return None
+    return label
 
 
 def _sql_string_list(values: Sequence[str]) -> str:
