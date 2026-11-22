@@ -15,7 +15,8 @@ These tests assert two independent things:
 2. The *exports conform to the contract* — the four concrete processors are run
    against synthetic (non-PHI) fixtures and every materialised table is checked,
    column-for-column and type-for-type, against the schema the contract declares
-   for it, including the zero-row shape an absent optional sheet produces.
+   for it (cell_grain, or stlmt_cell_grain for the settlement relations),
+   including the zero-row shape an absent optional sheet produces.
 
 The synthetic fixtures are reused verbatim from
 ``test_aco_workbook_processors.py`` and ``test_settlement_submission.py`` so no
@@ -92,7 +93,7 @@ def contract():
 
 def test_contract_declares_an_exact_version(contract):
     """The contract is exactly versioned — v1 is pinned, not open-ended."""
-    assert contract["version"] == "1.2.0"
+    assert contract["version"] == "1.3.0"
     assert contract["grain"] == "cell"
 
 
@@ -124,6 +125,26 @@ def test_optional_relations_are_exactly_the_documented_optional_sheets(contract)
         r["relation"] for r in contract["relations"] if r.get("optional", False)
     }
     assert declared_optional == EXPECTED_OPTIONAL
+
+
+def test_optional_flags_match_the_defs(contract):
+    """A def's ``optional`` decides whether its absence fails the run, so the
+    contract's flag must say exactly the same."""
+    for r in contract["relations"]:
+        _, sheet_def = EXPECTED_RELATIONS[r["relation"]]
+        assert r.get("optional", False) == sheet_def.optional, r["relation"]
+
+
+def test_stlmt_relations_use_the_layout_schema(contract):
+    """STLMT relations carry cell_grain plus the three layout columns, in the
+    order the processor emits them; every other relation carries cell_grain."""
+    cell = [c["name"] for c in contract["schemas"]["cell_grain"]["columns"]]
+    stlmt = [c["name"] for c in contract["schemas"]["stlmt_cell_grain"]["columns"]]
+    assert [c for c in stlmt if c not in cell] == ["block_label", "row_kind", "column_code"]
+    assert [c for c in stlmt if c in cell] == cell
+    for r in contract["relations"]:
+        expected = "stlmt_cell_grain" if r["family"] == "STLMT" else "cell_grain"
+        assert r["schema"] == expected, r["relation"]
 
 
 def test_accepted_output_set_is_all_thirty_three_relations(contract):

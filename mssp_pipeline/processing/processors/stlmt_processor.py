@@ -32,10 +32,16 @@ class STLMTProcessor(ACOWorkbookProcessor):
 
     PERIOD is the 'Y<PY>' filename token and FILE_DATE the D stamp (NULL for a
     placeholder such as D259999). BENCHMARK_YEAR is not a settlement concept.
+
+    Its tables carry the layout grammar (BLOCK_LABEL, ROW_KIND, COLUMN_CODE)
+    on top of the shared cell grain, so the real layout survives: Table A1's
+    lettered columns, Table 2's total row, Table A2's two blocks.
     """
 
     SHEET_DEFS: List[SheetDef] = STLMT_SHEET_DEFS
     FILENAME_TOKEN = _FILENAME_TOKEN
+    # BLOCK_LABEL, ROW_KIND and COLUMN_CODE (see SectionedSheetProcessor).
+    LAYOUT_COLUMNS = True
 
     def _list_source_file_paths(self, file_def) -> List[Tuple[str, str]]:
         """The base listing, narrowed to files named exactly like the workbook.

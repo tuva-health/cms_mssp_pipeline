@@ -6,17 +6,20 @@ CMS's final result for a performance year. Its 'Table *' sheets and its
 Parameters tab load into STLMT_* cell-grain tables through the shared
 sectioned-sheet grammar; Cover, TOC and Glossary do not.
 
-Tested through the processor's output tables (raw_data.stlmt_*):
+Tested through the processor's output tables (raw_data.stlmt_*), against a
+synthetic workbook in the real CMS layout (stlmt_workbook.py):
 
-- each STLMT table holds its own sheet, and only the documented sheets load;
+- each STLMT table holds its own sheet, every sheet is found (a short sheet
+  behind a low cover used to vanish), and a missing required sheet fails;
 - discovery keys on the '.STLMT.Y' filename token and ignores the bundle's
   other workbooks;
 - PERFORMANCE_YEAR, SUBMISSION_ID and IS_EMBARGOED identify the delivery, and
   the embargoed and unembargoed copies both load with the unembargoed one
   identifiable as preferred;
-- Table 2, Table 3 and Table A1 keep their lettered rows (single and double
-  letters) and per-enrollment-type rows apart, which is what the connector
-  stages.
+- each table keeps the real structure through the layout grammar
+  (BLOCK_LABEL, ROW_KIND, COLUMN_CODE): Table 3's [A]-[UU], Table A1's
+  lettered columns, Table 2's total row, Table A2's blocks, Table A4's grid;
+- the numbers read back agree across tables the way CMS computes them.
 
 Every fixture is synthetic.
 """
@@ -28,7 +31,9 @@ import pytest
 from mssp_pipeline.processing.exporters.duckdb_exporter import DuckDBExporter
 from mssp_pipeline.processing.processors.stlmt_processor import STLMTProcessor
 
+from . import stlmt_workbook as wb
 from .conftest import ACO_ID
+from .stlmt_workbook import STLMT_SHEET_BY_TABLE, TYPES, stlmt_sheets
 from .test_aco_workbook_processors import (
     config_for,
     counts,
@@ -36,18 +41,7 @@ from .test_aco_workbook_processors import (
     run,
     write_workbook,
 )
-from .test_settlement_submission import (
-    BY3_RISK_SCORE,
-    EMBARGOED,
-    PY_RISK_SCORE,
-    STLMT_SHEET_BY_TABLE,
-    TYPE_BENCHMARK,
-    TYPES,
-    UNEMBARGOED,
-    UPDATED_BENCHMARK,
-    make_stlmt_bundle,
-    stlmt_sheets,
-)
+from .test_settlement_submission import EMBARGOED, UNEMBARGOED, make_stlmt_bundle
 
 STLMT_TABLES = set(STLMT_SHEET_BY_TABLE) | {"stlmt_parameters"}
 
@@ -57,28 +51,56 @@ STLMT_TABLES = set(STLMT_SHEET_BY_TABLE) | {"stlmt_parameters"}
 # ===========================================================================
 
 
-@pytest.mark.parametrize(
-    "table,tag", [(t, v[1]) for t, v in STLMT_SHEET_BY_TABLE.items()]
-)
-def test_each_stlmt_table_holds_its_own_sheet(
-    test_session, test_config, raw_dir, table, tag
-):
-    """Each fixture sheet carries a section and row label unique to it, so a
-    pattern pointing at the wrong sheet fails here. 'Table 1 - %' must not
-    take Table 1A-1C, and 'Table A1 - %' must not take Table 1."""
-    make_stlmt_bundle(raw_dir)
-    conn = run(STLMTProcessor, test_session, test_config)
+# A cell only its own sheet has: (table, SQL predicate).
+SIGNATURES = {
+    "stlmt_table_1": "section_code = 'A1' AND section_label = 'Assigned Beneficiaries'",
+    "stlmt_table_1a": "section_code = 'N' AND column_label = 'Regional Adjustment'",
+    "stlmt_table_1b": "section_label = 'Prior Savings Adjustment ($)'",
+    "stlmt_table_1c": "section_label = 'Population Adjustment ($)'",
+    "stlmt_table_2": "section_label = 'Updated Benchmark ($)'",
+    "stlmt_table_3": "section_code = 'UU'",
+    "stlmt_table_a1": "column_code = 'I' AND column_label = 'Final Risk Ratio (Capped)'",
+    "stlmt_table_a2": f"block_label = '{wb.A2_BLOCKS[1]}'",
+    "stlmt_table_a3": "section_label = 'Three-Way Blended Update Factors'",
+    "stlmt_table_a4": "column_label = 'MSR Range: High'",
+    "stlmt_table_a5": "column_label = 'ENHANCED Track'",
+    "stlmt_table_a6": "section_label = 'ACPT'",
+}
 
-    assert conn.execute(
-        f"SELECT COUNT(*) FROM raw_data.{table} "
-        f"WHERE section_label = 'Table {tag} Section' "
-        f"AND row_label = 'Row Unique To Table {tag}'"
-    ).fetchone()[0] > 0
-    assert conn.execute(
-        f"SELECT COUNT(*) FROM raw_data.{table} "
-        f"WHERE row_label LIKE 'Row Unique To Table %' "
-        f"AND row_label <> 'Row Unique To Table {tag}'"
-    ).fetchone()[0] == 0
+
+@pytest.fixture
+def stlmt(test_session, test_config, raw_dir):
+    make_stlmt_bundle(raw_dir)
+    return run(STLMTProcessor, test_session, test_config)
+
+
+@pytest.mark.parametrize("table", sorted(SIGNATURES))
+def test_each_stlmt_table_holds_its_own_sheet(stlmt, table):
+    """A pattern pointing at the wrong sheet fails here: 'Table 1 - %' must not
+    take Table 1A-1C, and 'Table A1 - %' must not take Table 1."""
+    for other in SIGNATURES:
+        found = stlmt.execute(
+            f"SELECT COUNT(*) FROM raw_data.{other} WHERE {SIGNATURES[table]}"
+        ).fetchone()[0]
+        assert (found > 0) == (other == table), (table, other)
+
+
+def test_every_sheet_loads_rows(stlmt):
+    """Tables 1C, A1 and A5 are short sheets behind a cover that starts low,
+    the shape that made a combined read_sheets() drop them (TUVA-167)."""
+    assert all(n > 0 for n in counts(stlmt).values()), counts(stlmt)
+
+
+def test_a_missing_required_sheet_fails_the_run(test_session, test_config, raw_dir):
+    sheets = stlmt_sheets()
+    del sheets["Table A1 - Risk"]
+    write_workbook(
+        raw_dir / ACO_ID / "2025" / "01" / f"P.{ACO_ID}.ACO.STLMT.D259999.T1111111"
+        / f"P.{ACO_ID}.ACO.STLMT.Y2025.D259999.T1111111.xlsx",
+        sheets,
+    )
+    with pytest.raises(RuntimeError, match="STLMT_TABLE_A1"):
+        run(STLMTProcessor, test_session, test_config)
 
 
 def test_only_the_table_sheets_and_parameters_load(
@@ -100,16 +122,10 @@ def test_parameters_is_read_as_key_values(test_session, test_config, raw_dir):
     ).fetchone()[0] == "BASIC Level A"
 
 
-def test_footnote_and_notes_rows_are_dropped(test_session, test_config, raw_dir):
-    make_stlmt_bundle(raw_dir)
-    conn = run(STLMTProcessor, test_session, test_config)
-
-    for table in STLMT_SHEET_BY_TABLE:
-        assert conn.execute(
-            f"SELECT COUNT(*) FROM raw_data.{table} "
-            f"WHERE row_label LIKE 'Note%' OR row_label LIKE '%ootnote%' "
-            f"OR row_label LIKE 'Weighted%' OR row_label LIKE 'Earned payment%'"
-        ).fetchone()[0] == 0, table
+def test_notes_rows_are_dropped(stlmt):
+    assert stlmt.execute(
+        "SELECT COUNT(*) FROM raw_data.stlmt_table_a5 WHERE row_label LIKE 'Note%'"
+    ).fetchone()[0] == 0
 
 
 def test_a_workbook_without_table_a6_does_not_fail_the_run(
@@ -286,149 +302,284 @@ def test_a_settlement_workbook_outside_a_settlement_bundle_keeps_its_identity(
 
 
 # ===========================================================================
-# Lettered rows and enrollment types (what TUVA-159 stages)
+# The real layout, through the layout grammar (TUVA-167)
 # ===========================================================================
 
+DASH = "–"
 
-def _cells(conn, table, section_code):
+# Table 3's codes, in sheet order, from the CMS template.
+TABLE_3_CODES = [
+    "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O",
+    "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "AA", "BB", "CC",
+    "DD", "EE", "FF", "GG", "HH", "II", "JJ", "KK", "LL", "MM", "NN", "OO",
+    "PP", "QQ", "RR", "SS", "TT", "UU",
+]
+
+
+def _rows(conn, table, where="TRUE", columns="*"):
     return conn.execute(
-        f"SELECT row_label, column_label, value_text FROM raw_data.{table} "
-        f"WHERE section_code = ? ORDER BY row_num, column_label",
-        [section_code],
+        f"SELECT {columns} FROM raw_data.{table} WHERE {where} ORDER BY row_num, column_label"
     ).fetchall()
 
 
-def test_table_2_updated_benchmark_rows(test_session, test_config, raw_dir):
-    make_stlmt_bundle(raw_dir)
-    conn = run(STLMTProcessor, test_session, test_config)
-
-    # [I] carries its value on the lettered row itself.
-    assert _cells(conn, "stlmt_table_2", "I") == [
-        ("Updated Benchmark ($)", "BY3", "-"),
-        ("Updated Benchmark ($)", "Performance Year", UPDATED_BENCHMARK),
+def test_table_3_loads_every_code_in_one_value_column(stlmt):
+    codes = [
+        r[0] for r in stlmt.execute(
+            "SELECT section_code FROM raw_data.stlmt_table_3 "
+            "GROUP BY section_code ORDER BY MIN(row_num)"
+        ).fetchall()
     ]
-    # [H] heads one row per enrollment type.
-    assert [
-        (row, value) for row, column, value in _cells(conn, "stlmt_table_2", "H")
-        if column == "Performance Year"
-    ] == [(t, TYPE_BENCHMARK[t]) for t in TYPES]
-    assert conn.execute(
-        "SELECT DISTINCT section_label FROM raw_data.stlmt_table_2 WHERE section_code = 'H'"
-    ).fetchall() == [("Updated Historical Benchmark Expenditure ($)",)]
-
-
-def test_table_3_double_letter_codes_and_text_results(
-    test_session, test_config, raw_dir
-):
-    make_stlmt_bundle(raw_dir)
-    conn = run(STLMTProcessor, test_session, test_config)
-
-    assert _cells(conn, "stlmt_table_3", "MM") == [
-        ("Net Payment ($)", "Performance Year", "-"),
-        ("Net Payment ($)", "Result", "-1,234"),
+    assert codes == TABLE_3_CODES
+    assert _rows(stlmt, "stlmt_table_3", columns="DISTINCT column_label") == [
+        ("Performance Year",)
     ]
-    assert _cells(conn, "stlmt_table_3", "AA")[1] == ("Final Sharing Rate", "Result", "0.5")
-    # 'N/A' is a result, kept verbatim, not read as missing.
-    assert _cells(conn, "stlmt_table_3", "P")[1] == ("Savings Realized", "Result", "N/A")
-    # Person years: one row per enrollment type under [B].
-    assert [
-        row for row, column, _ in _cells(conn, "stlmt_table_3", "B")
-        if column == "Performance Year"
-    ] == list(TYPES)
-    # Unbracketed step headers become GROUP_LABEL.
-    assert conn.execute(
-        "SELECT DISTINCT section_code, group_label FROM raw_data.stlmt_table_3 "
-        "WHERE section_code IN ('A', 'P', 'AA', 'MM') AND row_label <> 'Row Unique To Table 3' "
-        "ORDER BY 1"
+    # [C] and [D] are per type; every other code is one value on its own row.
+    assert stlmt.execute(
+        "SELECT section_code, row_kind, COUNT(*) FROM raw_data.stlmt_table_3 "
+        "WHERE section_code IN ('B', 'C', 'D') GROUP BY ALL ORDER BY 1"
+    ).fetchall() == [("B", "CODE", 1), ("C", "DETAIL", 4), ("D", "DETAIL", 4)]
+    assert stlmt.execute(
+        "SELECT COUNT(*) FROM raw_data.stlmt_table_3 WHERE row_kind = 'CODE'"
+    ).fetchone()[0] == len(TABLE_3_CODES) - 2
+
+
+def test_table_3_keeps_text_dashes_and_e_notation_verbatim(stlmt):
+    value = dict(stlmt.execute(
+        "SELECT section_code, value_text FROM raw_data.stlmt_table_3 WHERE row_kind = 'CODE'"
+    ).fetchall())
+    assert (value["P"], value["Z"], value["AA"], value["BB"]) == ("Savings", "Y", "NA", "N")
+    assert value["M"] == DASH and value["UU"] == DASH
+    assert value["OO"] == "5.0E7"
+    assert stlmt.execute(
+        "SELECT DISTINCT group_label FROM raw_data.stlmt_table_3 WHERE section_code = 'CC'"
+    ).fetchall() == [("Sharing and Losses Rate Calculations",)]
+
+
+def test_table_a1_letters_are_column_codes_with_clean_labels(stlmt):
+    assert stlmt.execute(
+        "SELECT column_code, column_label FROM raw_data.stlmt_table_a1 "
+        "GROUP BY ALL ORDER BY 1"
     ).fetchall() == [
-        ("A", "Determine Savings"),
-        ("AA", "Determine Earned Payment"),
-        ("MM", "Determine Earned Payment"),
-        ("P", "Determine Savings"),
+        ("A", "Risk Score Weights"),
+        ("B", "BY3 CMS-HCC Risk Score"),
+        ("C", "PY CMS-HCC Risk Score"),
+        ("D", "CMS-HCC Risk Ratio (Uncapped)"),
+        ("E", "BY3 Demographic Risk Score"),
+        ("F", "PY Demographic Risk Score"),
+        ("G", "Demographic Risk Ratio"),
+        ("H", "Aggregate Cap"),
+        ("I", "Final Risk Ratio (Capped)"),
     ]
+    assert stlmt.execute(
+        "SELECT DISTINCT section_code, row_kind FROM raw_data.stlmt_table_a1"
+    ).fetchall() == [(None, "DETAIL")]
+    # One row per type, then the weighted average, filled only under [D] and [G].
+    assert [
+        r[0] for r in stlmt.execute(
+            "SELECT row_label FROM raw_data.stlmt_table_a1 GROUP BY 1 ORDER BY MIN(row_num)"
+        ).fetchall()
+    ] == [*TYPES, "Weighted Average"]
+    assert stlmt.execute(
+        "SELECT column_code FROM raw_data.stlmt_table_a1 "
+        f"WHERE row_label = 'Weighted Average' AND value_text <> '{DASH}' ORDER BY 1"
+    ).fetchall() == [("D",), ("G",)]
 
 
-def test_table_a1_risk_blocks_by_enrollment_type(test_session, test_config, raw_dir):
-    make_stlmt_bundle(raw_dir)
-    conn = run(STLMTProcessor, test_session, test_config)
-
-    assert conn.execute(
-        "SELECT row_label, column_label, value_text FROM raw_data.stlmt_table_a1 "
-        "WHERE section_code = 'B' AND row_label = 'Disabled' ORDER BY column_label"
+def test_table_2_drops_sub_header_text_and_marks_the_total_row(stlmt):
+    assert stlmt.execute(
+        "SELECT COUNT(*) FROM raw_data.stlmt_table_2 "
+        "WHERE value_text IN ('3-Year Average Benchmark', 'BY3')"
+    ).fetchone()[0] == 0
+    assert _rows(stlmt, "stlmt_table_2", columns="DISTINCT column_label") == [
+        ("Benchmark Period",), ("Performance Year",),
+    ]
+    assert stlmt.execute(
+        "SELECT section_code, row_label, column_label FROM raw_data.stlmt_table_2 "
+        f"WHERE row_kind = 'TOTAL' AND value_text <> '{DASH}'"
     ).fetchall() == [
-        ("Disabled", "BY3", BY3_RISK_SCORE["Disabled"]),
-        ("Disabled", "Performance Year", PY_RISK_SCORE["Disabled"]),
+        ("A", "Historical Benchmark Expenditures After Applying Adjustment", "Benchmark Period")
     ]
-    assert conn.execute(
-        "SELECT COUNT(DISTINCT row_label) FROM raw_data.stlmt_table_a1 "
-        "WHERE section_code = 'F'"
-    ).fetchone()[0] == len(TYPES)
+    # [B] carries BY3 and PY on the same per-type row.
+    assert stlmt.execute(
+        "SELECT row_label, COUNT(*) FROM raw_data.stlmt_table_2 "
+        f"WHERE section_code = 'B' AND value_text <> '{DASH}' GROUP BY 1 ORDER BY MIN(row_num)"
+    ).fetchall() == [(t, 2) for t in TYPES]
+    assert stlmt.execute(
+        "SELECT row_kind, COUNT(*) FROM raw_data.stlmt_table_2 WHERE section_code = 'I' GROUP BY 1"
+    ).fetchall() == [("CODE", 2)]
+
+
+def test_table_a2_blocks_are_labelled(stlmt):
+    assert stlmt.execute(
+        "SELECT block_label, COUNT(DISTINCT row_label), COUNT(*) "
+        "FROM raw_data.stlmt_table_a2 GROUP BY 1 ORDER BY MIN(row_num)"
+    ).fetchall() == [(wb.A2_BLOCKS[0], 4, 16), (wb.A2_BLOCKS[1], 4, 16)]
+    assert stlmt.execute(
+        "SELECT COUNT(*) FROM raw_data.stlmt_table_a2 WHERE row_label = 'Medicare Enrollment Type'"
+    ).fetchone()[0] == 0
+
+
+def test_table_a4_is_a_grid_keyed_by_its_low_bound(stlmt):
+    assert stlmt.execute(
+        "SELECT row_label, column_label, value_text FROM raw_data.stlmt_table_a4 "
+        "WHERE row_label = '10000' ORDER BY column_label"
+    ).fetchall() == [
+        ("10000", "MSR Range: High", "0.027"),
+        ("10000", "MSR Range: Low", "0.03"),
+        ("10000", "Number of Assigned Beneficiaries Range: High", "14999"),
+        ("10000", "Number of Assigned Beneficiaries Range: Low", "10000"),
+    ]
+    assert stlmt.execute(
+        "SELECT COUNT(DISTINCT row_label) FROM raw_data.stlmt_table_a4"
+    ).fetchone()[0] == len(wb.MSR_GRID)
+
+
+def test_table_1b_keeps_its_blank_lettered_rows(stlmt):
+    assert stlmt.execute(
+        "SELECT section_code, COUNT(*), COUNT(value_text) FROM raw_data.stlmt_table_1b "
+        "WHERE section_code IN ('E', 'F') GROUP BY 1 ORDER BY 1"
+    ).fetchall() == [("E", 4, 0), ("F", 4, 0)]
+
+
+def test_table_1_drops_the_excel_spacer_column(stlmt):
+    assert sorted(_rows(stlmt, "stlmt_table_1", columns="DISTINCT column_label")) == [
+        ("BY1",), ("BY2",), ("BY3",), ("Benchmark",),
+    ]
+
+
+def test_parameters_tell_repeated_keys_apart_by_group(stlmt):
+    assert stlmt.execute(
+        "SELECT group_label, value_text FROM raw_data.stlmt_parameters "
+        "WHERE row_label = 'Benchmark Year 3 (BY3)' ORDER BY row_num"
+    ).fetchall() == [
+        ("Claims-Based Beneficiary Assignment Window", "01/01/2024 - 12/31/2024"),
+        ("Expenditure & Risk Score Period", "01/01/2024 - 12/31/2024"),
+        ("Benchmark Year Weights", "0.6"),
+    ]
+    assert stlmt.execute(
+        "SELECT value_text FROM raw_data.stlmt_parameters WHERE row_label = 'ACO Track'"
+    ).fetchone()[0] == "BASIC Level A"
 
 
 # ===========================================================================
-# The fixture's values follow the CMS calculation (TUVA-165)
+# The fixture's numbers follow the CMS calculation (TUVA-165, TUVA-167)
 #
-# TUVA-159 and TUVA-162 assert against these numbers, so they must agree with
-# each other the way a real settlement's do, read back through the processor.
+# TUVA-168 asserts against these numbers, so they must agree with each other
+# the way a real settlement's do, read back through the processor.
 # ===========================================================================
 
 
-def _numbers(conn, table, section_code, column):
-    """{row_label: float} for one lettered block and one value column.
+def _num(value: str) -> float:
+    return float(value.replace(",", ""))
 
-    The sheet-marker row ('Row Unique To Table N') is not a figure.
-    """
+
+def _by_type(conn, table, code, column):
+    """{type: float} for one lettered block and one value column."""
+    rows = conn.execute(
+        f"SELECT row_label, value_text FROM raw_data.{table} "
+        "WHERE section_code = ? AND column_label = ? AND row_kind = 'DETAIL'",
+        [code, column],
+    ).fetchall()
+    return {row: _num(value) for row, value in rows}
+
+
+def _single(conn, table, code, column="Performance Year"):
+    (value,) = conn.execute(
+        f"SELECT value_text FROM raw_data.{table} "
+        "WHERE section_code = ? AND column_label = ? AND row_kind IN ('CODE', 'TOTAL')",
+        [code, column],
+    ).fetchone()
+    return _num(value)
+
+
+def _a1(conn, code):
     return {
-        row: float(value.replace(",", ""))
-        for row, col, value in _cells(conn, table, section_code)
-        if col == column
-        and value not in ("-", "N/A")
-        and not row.startswith("Row Unique To")
+        row: _num(value) for row, value in conn.execute(
+            "SELECT row_label, value_text FROM raw_data.stlmt_table_a1 "
+            "WHERE column_code = ? AND row_label <> 'Weighted Average'",
+            [code],
+        ).fetchall()
     }
 
 
-def test_table_2_updated_benchmark_is_the_person_year_weighted_type_benchmark(
-    test_session, test_config, raw_dir
-):
-    make_stlmt_bundle(raw_dir)
-    conn = run(STLMTProcessor, test_session, test_config)
-
-    person_years = _numbers(conn, "stlmt_table_3", "B", "Performance Year")
-    assert set(person_years) == set(TYPES)
-    assigned = _numbers(conn, "stlmt_table_3", "A", "Performance Year")["Assigned Beneficiaries"]
-    assert sum(person_years.values()) <= assigned
-
-    # Table 2 [A]: each type's share of performance-year person years.
-    shares = _numbers(conn, "stlmt_table_2", "A", "Performance Year")
-    total = sum(person_years.values())
-    assert {t: shares[t] for t in TYPES} == pytest.approx(
-        {t: person_years[t] / total for t in TYPES}
-    )
-
-    # [I] = sum over types of [A] x [H].
-    type_benchmark = _numbers(conn, "stlmt_table_2", "H", "Performance Year")
-    updated = _numbers(conn, "stlmt_table_2", "I", "Performance Year")["Updated Benchmark ($)"]
-    assert updated == pytest.approx(sum(shares[t] * type_benchmark[t] for t in TYPES))
-    # The types differ, so a wrong weighting cannot pass by accident.
-    assert len(set(type_benchmark.values())) == len(TYPES)
-
-
-def test_table_a1_capped_ratio_is_the_score_ratio_below_the_cap(
-    test_session, test_config, raw_dir
-):
-    make_stlmt_bundle(raw_dir)
-    conn = run(STLMTProcessor, test_session, test_config)
-
-    by3 = _numbers(conn, "stlmt_table_a1", "B", "BY3")
-    py = _numbers(conn, "stlmt_table_a1", "B", "Performance Year")
-    capped = _numbers(conn, "stlmt_table_a1", "F", "Performance Year")
-    assert set(by3) == set(py) == set(capped) == set(TYPES)
+def test_table_a1_ratios_follow_the_scores_and_the_cap(stlmt):
+    a, b, c, d = (_a1(stlmt, k) for k in "ABCD")
+    e, f, g, h, i = (_a1(stlmt, k) for k in "EFGHI")
+    assert set(b) == set(TYPES)
+    assert sum(a.values()) == pytest.approx(1)
     for t in TYPES:
-        ratio = py[t] / by3[t]
-        # No demographic growth: the cap is 1.03 and binds for no type.
-        assert ratio < 1.03
-        assert capped[t] == pytest.approx(ratio)
-    assert len(set(capped.values())) == len(TYPES)
+        assert d[t] == pytest.approx(c[t] / b[t])
+        assert g[t] == pytest.approx(f[t] / e[t])
+    weighted_d = sum(a[t] * d[t] for t in TYPES)
+    weighted_g = sum(a[t] * g[t] for t in TYPES)
+    assert h == pytest.approx({t: weighted_g + 0.03 for t in TYPES})
+    # The cap does not bind, so the final ratio is the uncapped one.
+    assert weighted_d < min(h.values())
+    assert i == pytest.approx(d)
+    assert len(set(i.values())) == len(TYPES)
+
+
+def test_table_2_follows_tables_1_a1_a3_and_3(stlmt):
+    hb = _by_type(stlmt, "stlmt_table_2", "A", "Benchmark Period")
+    by3 = _by_type(stlmt, "stlmt_table_2", "B", "Benchmark Period")
+    py = _by_type(stlmt, "stlmt_table_2", "B", "Performance Year")
+    c, d, e, f, g, h = (
+        _by_type(stlmt, "stlmt_table_2", k, "Performance Year") for k in "CDEFGH"
+    )
+    assert set(hb) == set(TYPES)
+    assert hb == pytest.approx(_by_type(stlmt, "stlmt_table_1", "L", "Benchmark"))
+    assert _single(stlmt, "stlmt_table_2", "A", "Benchmark Period") == pytest.approx(
+        _single(stlmt, "stlmt_table_1", "M", "Benchmark")
+    )
+    assert by3 == pytest.approx(_a1(stlmt, "B"))
+    assert py == pytest.approx(_a1(stlmt, "C"))
+    assert c == pytest.approx(_a1(stlmt, "I"))
+    assert e == pytest.approx(_by_type(stlmt, "stlmt_table_a3", "G", "PY"))
+    assert f == pytest.approx(_by_type(stlmt, "stlmt_table_a3", "I", "PY"))
+    assert h == pytest.approx(_by_type(stlmt, "stlmt_table_3", "D", "Performance Year"))
+    for t in TYPES:
+        assert d[t] == pytest.approx(hb[t] * c[t])
+        assert g[t] == pytest.approx(d[t] * f[t])
+    updated = _single(stlmt, "stlmt_table_2", "I")
+    assert updated == pytest.approx(sum(g[t] * h[t] for t in TYPES))
+    # TUVA-165's updated benchmark is kept.
+    assert updated == pytest.approx(13920)
+
+
+def test_table_3_follows_the_shared_savings_calculation(stlmt):
+    v = {
+        code: _single(stlmt, "stlmt_table_3", code)
+        for code in ("A", "B", "E", "F", "G", "H", "I", "J", "K", "L", "N", "X",
+                     "CC", "EE", "FF", "GG", "HH", "JJ", "KK", "LL", "MM")
+    }
+    per_capita = _by_type(stlmt, "stlmt_table_3", "C", "Performance Year")
+    shares = _by_type(stlmt, "stlmt_table_3", "D", "Performance Year")
+    assert sum(shares.values()) == pytest.approx(1)
+    assert v["E"] == pytest.approx(sum(per_capita[t] * shares[t] for t in TYPES))
+    assert v["F"] == pytest.approx(_single(stlmt, "stlmt_table_2", "I"))
+    assert v["G"] == pytest.approx(v["E"] * v["B"])
+    assert v["H"] == pytest.approx(v["F"] * v["B"])
+    assert v["I"] == pytest.approx(v["H"] - v["G"])
+    assert (v["J"], v["K"]) == pytest.approx((max(v["I"], 0), min(v["I"], 0)))
+    assert v["N"] == pytest.approx(v["L"] * v["H"])
+    # The MSR is Table A4's sliding scale at [A] beneficiaries.
+    low, high, msr_low, msr_high = next(
+        (lo, hi, ml, mh) for lo, hi, ml, mh in wb.MSR_GRID
+        if hi.isdigit() and int(lo) <= v["A"] <= int(hi)
+    )
+    span = (v["A"] - int(low)) / (int(high) + 1 - int(low))
+    assert v["L"] == pytest.approx(float(msr_low) + span * (float(msr_high) - float(msr_low)))
+    # The quality standard is met, so the final rate is Table A5's maximum.
+    assert v["X"] == _num(stlmt.execute(
+        "SELECT value_text FROM raw_data.stlmt_table_a5 "
+        "WHERE row_label LIKE 'Maximum Sharing Rate%' AND column_label = 'BASIC Track Level A'"
+    ).fetchone()[0])
+    assert v["CC"] == v["X"]
+    assert v["EE"] == pytest.approx(v["J"] * v["CC"])
+    assert v["GG"] == pytest.approx(0.02 * v["EE"])
+    assert v["HH"] == pytest.approx(min(v["EE"] - v["GG"], v["FF"]))
+    assert v["LL"] == pytest.approx(v["JJ"] - v["KK"])
+    assert v["MM"] == pytest.approx(v["HH"] - v["KK"])
 
 
 # ===========================================================================
