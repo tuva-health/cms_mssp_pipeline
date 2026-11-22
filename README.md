@@ -549,8 +549,10 @@ connector's ALR seeds. The e2e run renders them back into xlsx workbooks
 (`tests/e2e/cms_workbooks.py`), and `tests/e2e/test_cms_workbooks.py` checks
 that the processors parse those workbooks into exactly the seed rows. So the
 pipeline's synthetic output and the connector's seeds stay the same data.
-`E2E_ACO_ID` in `tests/e2e/cms_workbooks.py` is the one place the e2e ACO is
-set. **Copy the seeds again whenever the connector regenerates them**; never
+The e2e ACO is the fixtures' own, `A0000`; `E2E_ACO_ID` in
+`tests/e2e/cms_workbooks.py` declares it once for the CCLF files and the
+STLMT bundle, and fails the run if the fixtures carry another. Moving to a
+different ACO means regenerating the seeds. **Copy the seeds again whenever the connector regenerates them**; never
 edit them by hand:
 
 ```bash

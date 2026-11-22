@@ -25,8 +25,9 @@ Never edit them by hand: they come from the generator.
 
 Rendering, per sheet (see ``SectionedSheetProcessor`` for the grammar):
 
-- a title in row 1, then the header row (two rows when a column carries a
-  ``COLUMN_GROUP_LABEL``) directly above the first section or data row;
+- the header row (two rows when a column carries a ``COLUMN_GROUP_LABEL``)
+  directly above the first section or data row, and a title in row 1 when
+  the header does not start there;
 - every data row at its own ``ROW_NUM``, its label in column A and its values
   in the columns its ``COLUMN_LABEL`` names;
 - the section rows the parser needs to reach each data row's
@@ -145,7 +146,10 @@ def load_cells(fixtures: Path = FIXTURES) -> Dict[str, List[Sheet]]:
                 column = (_blank(rec["column_group_label"]), rec["column_label"])
                 if column not in sheet.columns:
                     sheet.columns.append(column)
-                existing.values[column] = _blank(rec["value_text"])
+                value = _blank(rec["value_text"])
+                if existing.values.get(column, value) != value:
+                    raise ValueError(f"{rel} {table} row {row_num} {column}: two values")
+                existing.values[column] = value
     return {rel: list(sheets.values()) for rel, sheets in workbooks.items()}
 
 
@@ -182,13 +186,16 @@ def render_sheet(sheet: Sheet) -> List[list]:
                 cells[i] = values.get(column)
         return cells
 
+    # The parser's (GROUP_LABEL, SECTION_CODE, SECTION_LABEL) so far.
     state: State = (None, None, None)
     floor = 0  # the last row already used
     if parameters:
         # No header row: row 1 is read as data, and a leading blank row would
-        # be dropped (shifting every ROW_NUM), so it carries a heading.
-        grid[1] = line("Parameters")
-        state, floor = ("Parameters", None, "Parameters"), 1
+        # be dropped (shifting every ROW_NUM), so it carries a heading. An
+        # unbracketed heading sets the group and the section to its label.
+        heading = "Parameters"
+        grid[1] = line(heading)
+        state, floor = (heading, None, heading), 1
 
     first_used: Optional[int] = None
     for row_num in sorted(sheet.rows):
@@ -227,8 +234,10 @@ def render_sheet(sheet: Sheet) -> List[list]:
         floor = row_num
 
     if not parameters:
+        if first_used is None:
+            raise ValueError(f"{sheet.table}: no data rows")
         grouped = any(group is not None for group, _ in columns)
-        header_row = (first_used or 1) - (2 if grouped else 1)
+        header_row = first_used - (2 if grouped else 1)
         if header_row < 1:
             raise ValueError(f"{sheet.table}: no room for the header above row {first_used}")
         primary: list = ["Calculation"] + [None] * len(columns)
@@ -248,30 +257,30 @@ def render_sheet(sheet: Sheet) -> List[list]:
     return [grid.get(n, [None] * width) for n in range(1, last + 1)]
 
 
+def sheet_rows(sheets: List[Sheet]) -> Dict[str, List[list]]:
+    """{sheet name: rows} for one workbook, front matter first."""
+    rows = dict(FRONT_MATTER)
+    for sheet in sheets:
+        rows[SHEET_NAME[sheet.table]] = render_sheet(sheet)
+    return rows
+
+
 def write_workbook(path: Path, sheets: List[Sheet]) -> Path:
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
-    for name, rows in FRONT_MATTER.items():
+    for name, rows in sheet_rows(sheets).items():
         ws = wb.create_sheet(name)
         for row in rows:
-            ws.append(row)
-    for sheet in sheets:
-        ws = wb.create_sheet(SHEET_NAME[sheet.table])
-        for row in render_sheet(sheet):
             ws.append(row)
     path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(path)
     return path
 
 
-def render_delivery(store: Path, fixtures: Path = FIXTURES) -> List[Path]:
+def render_delivery(
+    store: Path, workbooks: Optional[Dict[str, List[Sheet]]] = None
+) -> List[Path]:
     """Write every fixture workbook under ``store`` at its own relative path."""
-    return [
-        write_workbook(store / rel, sheets)
-        for rel, sheets in sorted(load_cells(fixtures).items())
-    ]
-
-
-def workbook_sheets(rel_path: str, fixtures: Path = FIXTURES) -> List[Sheet]:
-    """The sheets of one fixture workbook, by its store-relative path."""
-    return load_cells(fixtures)[rel_path]
+    if workbooks is None:
+        workbooks = load_cells()
+    return [write_workbook(store / rel, sheets) for rel, sheets in sorted(workbooks.items())]

@@ -30,18 +30,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The synthetic e2e delivery is now CMS-consistent and matches
-  cms_mssp_connector's integration seeds (TUVA-165). Its BNMRK, AEXPU and
-  QEXPU workbooks are rendered from a copy of the connector's workbook seeds
-  (`tests/e2e/fixtures/workbooks/`), for the connector's ACO `A0000`, and a
+- Tests only: the synthetic e2e delivery now matches cms_mssp_connector's
+  integration seeds (TUVA-165). Its BNMRK, AEXPU and QEXPU workbooks are
+  rendered from a copy of the connector's workbook seeds
+  (`tests/e2e/fixtures/workbooks/`) for the connector's ACO `A0000`, and a
   new test checks that the processors parse them back into exactly those
-  rows. The connector's `scripts/dbt-pipeline-e2e` can now build
-  `fct_projected_savings`, `fact_benchmark_aco_quarter` and
-  `fact_member_month_benchmark` on pipeline output. The STLMT test workbook's
-  Table 2, Table 3 and Table A1 values now agree with each other: Table 2
-  `[I]` is the person-year-weighted `[H]`, and Table A1 `[F]` is the
-  performance-year score over the BY3 score. Its sections, row labels and
-  columns are unchanged. Test-only: no output table changes.
+  rows, so the connector's `scripts/dbt-pipeline-e2e` can build its
+  benchmark facts on pipeline output. The STLMT test workbook keeps its
+  synthetic sections, row labels and columns, but its Table 2, 3 and A1
+  values now agree: Table 2 `[I]` is the person-year-weighted `[H]`, and
+  Table A1 `[F]` is the performance-year score over the BY3 score, which is
+  the BNMRK fixture's. No output table changes.
 
 - **Breaking:** files in a final settlement (STLMT) bundle get their own
   `SUBMISSION_ID`: `STLMT.` plus the bundle directory's stamp, for example

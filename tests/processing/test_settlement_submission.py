@@ -83,10 +83,17 @@ PERSON_YEAR_SHARES = {"ESRD": "0.02", "Disabled": "0.08", "Aged/dual": "0.1", "A
 TYPE_BENCHMARK = {"ESRD": "95000", "Disabled": "14000", "Aged/dual": "21000", "Aged/non-dual": "11000"}
 # [I] = sum of [A] x [H] = 1900 + 1120 + 2100 + 8800.
 UPDATED_BENCHMARK = "13920"
-# Table A1 [B] CMS-HCC scores, and [F] the PY / BY3 ratio. Demographic growth
-# is nil, so the cap is 1.03 and binds for no type.
-BY3_RISK_SCORE = {"ESRD": "1.04", "Disabled": "0.95", "Aged/dual": "1.2", "Aged/non-dual": "0.88"}
-PY_RISK_SCORE = {"ESRD": "1.0504", "Disabled": "0.931", "Aged/dual": "1.224", "Aged/non-dual": "0.8932"}
+# Table A1 [B] CMS-HCC scores, and [F] the PY / BY3 ratio (the PY score is
+# BY3 x [F], to 7 decimals). Demographic growth is nil, so the cap is 1.03 and
+# binds for no type. The BY3 scores are the e2e BNMRK final delivery's Table 1
+# [C] BY3 (tests/e2e/fixtures/workbooks/bnmrk_table_1.csv), as in a real
+# settlement, where the BY3 side matches the benchmark report.
+BY3_RISK_SCORE = {
+    "ESRD": "0.8540764", "Disabled": "0.506856", "Aged/dual": "0.5337067", "Aged/non-dual": "0.8598672",
+}
+PY_RISK_SCORE = {
+    "ESRD": "0.8626172", "Disabled": "0.4967189", "Aged/dual": "0.5443808", "Aged/non-dual": "0.8727652",
+}
 CAPPED_RISK_RATIO = {"ESRD": "1.01", "Disabled": "0.98", "Aged/dual": "1.02", "Aged/non-dual": "1.015"}
 
 
@@ -199,7 +206,7 @@ def make_stlmt_bundle(
     notices=(),
     aco: str = ACO_ID,
     with_table_a6: bool = True,
-    with_aexpu: bool = True,
+    aexpu: Optional[dict] = None,
 ) -> Path:
     """Build one settlement bundle::
 
@@ -208,8 +215,8 @@ def make_stlmt_bundle(
             P.T0000.ACO.AEXPU.Y{year}.D{date}.T{file_time}.xlsx  <- AEXPUProcessor
             [<notice> ...]                 <- optional FinRec notice file(s)
 
-    ``file_time_str`` defaults to the bundle's own T stamp. ``with_aexpu=False``
-    leaves the AEXPU out, for a caller that writes its own.
+    ``file_time_str`` defaults to the bundle's own T stamp. ``aexpu`` replaces
+    the minimal AEXPU sheets ({sheet name: rows}).
     """
     bundle = raw_dir / aco / year / code / f"P.{aco}.ACO.STLMT.D{date_str}.T{time_str}"
     file_stamp = f"D{date_str}.T{file_time_str or time_str}"
@@ -217,10 +224,10 @@ def make_stlmt_bundle(
         bundle / f"P.{aco}.ACO.STLMT.Y{year}.{file_stamp}.xlsx",
         stlmt_sheets(with_table_a6),
     )
-    if with_aexpu:
-        write_workbook(
-            bundle / f"P.{aco}.ACO.AEXPU.Y{year}.{file_stamp}.xlsx", aexpu_sheets(year)
-        )
+    write_workbook(
+        bundle / f"P.{aco}.ACO.AEXPU.Y{year}.{file_stamp}.xlsx",
+        aexpu if aexpu is not None else aexpu_sheets(year),
+    )
     for name in notices:
         (bundle / name).write_bytes(b"%PDF-1.4 synthetic notice")
     return bundle

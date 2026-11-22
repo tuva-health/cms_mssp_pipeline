@@ -16,7 +16,7 @@ one only together with the protection rule.
 
 | Job | What it proves |
 | --- | --- |
-| `test` | `uv sync --frozen` (the `dev` dependency group carries every import the tests need, so no extras are installed) then `uv run --frozen pytest`, run in sequence on Python 3.10 (the `requires-python` floor) and 3.11 (the runtime image's interpreter) so the check keeps a single stable name. The suite covers the processing engine, the sequencer, the lease backends (against moto), the render goldens, and the genericity guard that keeps client literals out of this repository. |
+| `test` | `uv sync --frozen` (the `dev` dependency group carries every import the tests need, so no extras are installed) then `uv run --frozen pytest`, run in sequence on Python 3.10 (the `requires-python` floor) and 3.11 (the runtime image's interpreter) so the check keeps a single stable name. The suite covers the processing engine, the sequencer, the lease backends (against moto), the render goldens, the e2e workbook fixtures' round trip through the processors (`tests/e2e/test_cms_workbooks.py`), and the genericity guard that keeps client literals out of this repository. |
 | `lock` | `uv lock --check`: `uv.lock` is consistent with `pyproject.toml`, so the frozen image install is a function of the checkout alone. |
 | `terraform` | `terraform fmt -check -recursive`, then `terraform init -backend=false` and `terraform validate` for every root under `infra/terraform/aws/` (`foundation`, `bootstrap`, `activate`, `modules/lease-table`). Terraform version comes from `.terraform-version`. |
 | `shell` | `shellcheck scripts/*.sh docker/*.sh` at the default severity. |

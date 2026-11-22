@@ -106,12 +106,12 @@ EXPECTED_HALT = {
 # ---------------------------------------------------------------------------
 
 
-# The settlement bundle: PY2025, on the final benchmark delivery's stamp, so
-# the run also proves a settlement AEXPU keeps out of that submission (TUVA-154).
-SETTLEMENT_YEAR = "2025"
-SETTLEMENT_DATE = "259999"
-# Its AEXPU takes the CMS layout of the final delivery's BY3 workbook. Its
-# values are that workbook's: no settlement-year expenditure is generated yet.
+# The settlement bundle shares the final benchmark delivery's PY, code and
+# stamp, so the run also proves a settlement AEXPU keeps out of that
+# submission (TUVA-154). Its AEXPU takes the CMS layout of that delivery's BY3
+# workbook; the values are that workbook's, as no settlement-year expenditure
+# is generated yet.
+SETTLEMENT = dict(year="2025", code="01", date_str="259999", time_str=UNEMBARGOED)
 SETTLEMENT_AEXPU_LAYOUT = (
     f"{E2E_ACO_ID}/2025/01/P.{E2E_ACO_ID}.ACO.BNMRK.D259999.T{UNEMBARGOED}/"
     f"P.{E2E_ACO_ID}.ACO.AEXPU.Y2024.D259999.T{UNEMBARGOED}.xlsx"
@@ -121,19 +121,13 @@ SETTLEMENT_AEXPU_LAYOUT = (
 def build_delivery(store: Path) -> None:
     """Write the synthetic CMS delivery: workbooks plus one file per CCLF type."""
     store.mkdir(parents=True, exist_ok=True)
-    cms_workbooks.render_delivery(store)
-    bundle = make_stlmt_bundle(
+    workbooks = cms_workbooks.load_cells()
+    cms_workbooks.render_delivery(store, workbooks)
+    make_stlmt_bundle(
         store,
-        year=SETTLEMENT_YEAR,
-        date_str=SETTLEMENT_DATE,
-        time_str=UNEMBARGOED,
+        **SETTLEMENT,
         aco=E2E_ACO_ID,
-        with_aexpu=False,
-    )
-    cms_workbooks.write_workbook(
-        bundle
-        / f"P.{E2E_ACO_ID}.ACO.AEXPU.Y{SETTLEMENT_YEAR}.D{SETTLEMENT_DATE}.T{UNEMBARGOED}.xlsx",
-        cms_workbooks.workbook_sheets(SETTLEMENT_AEXPU_LAYOUT),
+        aexpu=cms_workbooks.sheet_rows(workbooks[SETTLEMENT_AEXPU_LAYOUT]),
     )
     for file_def in CCLF_FILE_DEFS:
         first = file_def.columns[0]
