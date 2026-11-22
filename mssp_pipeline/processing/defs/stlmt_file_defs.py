@@ -1,0 +1,31 @@
+from typing import List
+
+from .sectioned_sheet_defs import SheetDef
+
+# The final settlement (financial reconciliation) workbook. Like BNMRK, its
+# sheet names carry no underscores, and the ' - ' is what keeps 'Table 1 - %'
+# off 'Table 1A - ...' and 'Table A1 - %' off 'Table A1x - ...'. Cover, TOC and
+# Glossary carry no data and have no def.
+#
+# 'Table A6 - ACPT' is present only for agreements on the accountable care
+# prospective trend, as BNMRK 'Table 6 - ACPT' is; an absent sheet is a
+# non-event handled by SectionedSheetProcessor.
+STLMT_SHEET_DEFS: List[SheetDef] = [
+    SheetDef(table_name="STLMT_TABLE_1", sheet_pattern="Table 1 - %"),
+    SheetDef(table_name="STLMT_TABLE_1A", sheet_pattern="Table 1A - %"),
+    SheetDef(table_name="STLMT_TABLE_1B", sheet_pattern="Table 1B - %"),
+    SheetDef(table_name="STLMT_TABLE_1C", sheet_pattern="Table 1C - %"),
+    SheetDef(table_name="STLMT_TABLE_2", sheet_pattern="Table 2 - %"),
+    SheetDef(table_name="STLMT_TABLE_3", sheet_pattern="Table 3 - %"),
+    SheetDef(table_name="STLMT_TABLE_A1", sheet_pattern="Table A1 - %"),
+    SheetDef(table_name="STLMT_TABLE_A2", sheet_pattern="Table A2 - %"),
+    SheetDef(table_name="STLMT_TABLE_A3", sheet_pattern="Table A3 - %"),
+    SheetDef(table_name="STLMT_TABLE_A4", sheet_pattern="Table A4 - %"),
+    SheetDef(table_name="STLMT_TABLE_A5", sheet_pattern="Table A5 - %"),
+    SheetDef(table_name="STLMT_TABLE_A6", sheet_pattern="Table A6 - %"),
+    SheetDef(
+        table_name="STLMT_PARAMETERS",
+        sheet_pattern="Parameters",
+        synthetic_column_labels=("VALUE",),
+    ),
+]

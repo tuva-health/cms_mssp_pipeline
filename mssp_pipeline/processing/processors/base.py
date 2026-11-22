@@ -89,11 +89,12 @@ class FileProcessor(ABC):
             "CCLFProcessor": getattr(self.config, "PROCESS_BATCH_SIZE_CCLF", batch_size),
             "MSSPProcessor": getattr(self.config, "PROCESS_BATCH_SIZE_MSSP", batch_size),
             "MCQMProcessor": getattr(self.config, "PROCESS_BATCH_SIZE_MCQM", batch_size),
-            # All three sectioned-workbook processors share the existing
+            # Every sectioned-workbook processor shares the existing
             # MSSP_PROCESS_BATCH_SIZE_EXPU knob.
             "BNMRKProcessor": getattr(self.config, "PROCESS_BATCH_SIZE_EXPU", batch_size),
             "AEXPUProcessor": getattr(self.config, "PROCESS_BATCH_SIZE_EXPU", batch_size),
             "QEXPUProcessor": getattr(self.config, "PROCESS_BATCH_SIZE_EXPU", batch_size),
+            "STLMTProcessor": getattr(self.config, "PROCESS_BATCH_SIZE_EXPU", batch_size),
         }
         return max(1, int(overrides.get(self.__class__.__name__, batch_size)))
 

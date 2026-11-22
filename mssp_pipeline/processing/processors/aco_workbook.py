@@ -35,9 +35,9 @@ _EMBARGO_BY_T_STAMP = {"T0000000": True, "T1111111": False}
 
 
 class ACOWorkbookProcessor(SectionedSheetProcessor):
-    """Shared path handling for the BNMRK / AEXPU / QEXPU sectioned workbooks.
+    """Shared path handling for the BNMRK / AEXPU / QEXPU / STLMT sectioned workbooks.
 
-    All three live in the same organised file store::
+    All four live in the same organised file store::
 
         {FILE_STORE}/{ACO_ID}/{YEAR}/{CODE}/{BUNDLE_DIR}/{file}.xlsx
 

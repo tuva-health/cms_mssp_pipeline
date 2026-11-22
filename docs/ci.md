@@ -25,7 +25,7 @@ one only together with the protection rule.
 ## Synthetic end-to-end job (`e2e`, not required)
 
 `e2e` runs `tests/e2e/synthetic_run.py`: it writes a synthetic CMS delivery
-(the openpyxl BNMRK / AEXPU / QEXPU workbook fixtures plus one small
+(the openpyxl BNMRK / AEXPU / QEXPU / STLMT workbook fixtures plus one small
 fixed-width file per CCLF type, all fake values) and drives a three-stage plan
 through the real sequencer engine with the in-memory lease store, a synthetic
 readiness source and a fake ECS client whose tasks run locally:

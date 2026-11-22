@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The final settlement (financial reconciliation) workbook,
+  `P.{ACO}.ACO.STLMT.Y{PY}.D…T….xlsx`, now loads (TUVA-158). Its `Table *`
+  sheets and `Parameters` tab become thirteen new cell-grain tables:
+  `STLMT_TABLE_1`, `_1A`, `_1B`, `_1C`, `_2`, `_3`, `_A1` through `_A6`, and
+  `STLMT_PARAMETERS`. `Cover`, `TOC` and `Glossary` are skipped. Every row
+  carries `PERFORMANCE_YEAR`, the settlement `SUBMISSION_ID` and
+  `IS_EMBARGOED`; `PERIOD` is `Y<performance year>`. The embargoed and
+  unembargoed copies both load, and a reader prefers `IS_EMBARGOED = FALSE`.
+  `STLMT_TABLE_A6` (ACPT) is optional. The workbook contract moves to 1.2.0
+  and declares thirty-three relations. The processor shares the
+  `MSSP_PROCESS_BATCH_SIZE_EXPU` knob. New tables need no upgrade step.
+
 - Workbook tables carry `IS_EMBARGOED` (BOOLEAN), and the workbook contract
   moves to 1.1.0 (TUVA-154). It is set only on rows from a final settlement
   (STLMT) bundle: `TRUE` for the embargoed delivery (`T0000000`), `FALSE` for

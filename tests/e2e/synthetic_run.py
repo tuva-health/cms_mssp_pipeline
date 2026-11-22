@@ -4,8 +4,8 @@ Exercises the pipeline as one integrated whole with no client data, no
 credentials and no cloud (TUVA-70):
 
 1. Build a synthetic CMS delivery into a local file store from the existing
-   test builders: the openpyxl BNMRK / AEXPU / QEXPU workbooks and one small
-   fixed-width file per CCLF type. Every value is fake.
+   test builders: the openpyxl BNMRK / AEXPU / QEXPU / STLMT workbooks and one
+   small fixed-width file per CCLF type. Every value is fake.
 2. Drive a staged plan through the real sequencer engine
    (`mssp_pipeline.sequencer.Sequencer`) with the in-memory lease store, a
    synthetic readiness source and a fake ECS client whose "tasks" run locally:
@@ -76,6 +76,7 @@ from tests.processing.test_aco_workbook_processors import (
     make_bnmrk_bundle,
     make_qexpu_bundle,
 )
+from tests.processing.test_settlement_submission import make_stlmt_bundle
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = REPO_ROOT / "contracts" / "workbook" / "v1.json"
@@ -110,6 +111,7 @@ def build_delivery(store: Path) -> None:
     store.mkdir(parents=True, exist_ok=True)
     make_bnmrk_bundle(store)
     make_qexpu_bundle(store)
+    make_stlmt_bundle(store)
     for file_def in CCLF_FILE_DEFS:
         first = file_def.columns[0]
         rows = [{first.name: str(n).zfill(first.width)} for n in range(1, CCLF_ROWS_PER_FILE + 1)]

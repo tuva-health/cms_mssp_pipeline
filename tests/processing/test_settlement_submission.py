@@ -33,6 +33,7 @@ from mssp_pipeline.processing.processors.qexpu_processor import QEXPUProcessor
 
 from .conftest import ACO_ID
 from .test_aco_workbook_processors import (
+    PARAMETERS,
     aexpu_sheets,
     make_bnmrk_bundle,
     make_qexpu_bundle,
@@ -42,6 +43,124 @@ from .test_aco_workbook_processors import (
 
 EMBARGOED = "0000000"
 UNEMBARGOED = "1111111"
+
+TYPES = ("ESRD", "Disabled", "Aged/dual", "Aged/non-dual")
+
+
+# ---------------------------------------------------------------------------
+# Synthetic settlement (STLMT) workbook
+#
+# Sheet names are the real workbook's. The sheet bodies follow the layout of
+# the BNMRK report the settlement extends: title rows, a 'Table of Contents'
+# link, one header row with two or more value columns, lettered row blocks
+# ([A], [B], ... [MM]) that either carry a value themselves or head one row per
+# enrollment type, then a 'Note' block of footnote definitions. Every value is
+# fake, and each sheet carries a section and a row label naming its own table
+# so the table -> sheet mapping is checkable.
+# ---------------------------------------------------------------------------
+
+
+def _type_rows(*values) -> list:
+    return [[t, *values] for t in TYPES]
+
+
+def stlmt_matrix(tag: str, columns=("BY3", "Performance Year")) -> list:
+    """A settlement data sheet in the BNMRK layout, unique to its table."""
+    blanks = [None] * len(columns)
+    return [
+        [f"Table {tag}", *blanks],
+        ["Shared Savings Program Financial Reconciliation Report", *blanks],
+        ["Table of Contents", *blanks],
+        [f"Table {tag} Calculation", *columns],
+        [f"[A] Table {tag} Section", *blanks],
+        [f"Row Unique To Table {tag}", *[f"{tag}-{i}" for i in range(len(columns))]],
+        *_type_rows(*["1"] * len(columns)),
+        ["Note: Numerical values are synthetic.", *blanks],
+        [f"[A] Footnote for table {tag}.", *blanks],
+    ]
+
+
+# Table 2: per-type blocks [A]-[H], then the ACO-level updated benchmark [I].
+STLMT_TABLE_2 = [
+    ["Table 2", None, None],
+    ["Shared Savings Program Updated Benchmark", None, None],
+    ["Table of Contents", None, None],
+    ["Updated Benchmark Calculation", "BY3", "Performance Year"],
+    ["[A] Table 2 Section", None, None],
+    ["Row Unique To Table 2", "2-0", "2-1"],
+    *_type_rows("-", "0.5"),
+    ["[H] Updated Historical Benchmark Expenditure ($)", None, None],
+    *_type_rows("-", "10000"),
+    ["[I] Updated Benchmark ($)", "-", "12345.67"],
+    ["Note: Numerical values are synthetic.", None, None],
+    ["[I] Weighted by performance year person years.", None, None],
+]
+
+# Table 3: ACO-level lettered rows, a per-type block, double-letter codes, a
+# 'N/A' text result and the unbracketed group headers CMS separates steps with.
+STLMT_TABLE_3 = [
+    ["Table 3", None, None],
+    ["Shared Savings Program Shared Savings and Losses", None, None],
+    ["Table of Contents", None, None],
+    ["Shared Savings/Losses Calculation", "Performance Year", "Result"],
+    ["[A] Table 3 Section", None, None],
+    ["Row Unique To Table 3", "3-0", "3-1"],
+    ["Determine Savings", None, None],
+    ["[A] Assigned Beneficiaries", "1000", "-"],
+    ["[B] Person Years", None, None],
+    *_type_rows("250", "-"),
+    ["[P] Savings Realized", "-", "N/A"],
+    ["Determine Earned Payment", None, None],
+    ["[AA] Final Sharing Rate", "-", "0.5"],
+    ["[MM] Net Payment ($)", "-", "-1,234"],
+    ["Note: Numerical values are synthetic.", None, None],
+    ["[MM] Earned payment net of recoupment.", None, None],
+]
+
+# Table A1: per-type risk blocks over the BY3 and performance-year columns.
+STLMT_TABLE_A1 = [
+    ["Table A1", None, None],
+    ["Risk Adjustment", None, None],
+    ["Table of Contents", None, None],
+    ["Risk Calculation", "BY3", "Performance Year"],
+    ["[A] Table A1 Section", None, None],
+    ["Row Unique To Table A1", "A1-0", "A1-1"],
+    ["[B] CMS-HCC Risk Score", None, None],
+    *_type_rows("1.01", "1.02"),
+    ["[F] Capped CMS-HCC Risk Ratio", None, None],
+    *_type_rows("-", "1.003"),
+    ["Note: Numerical values are synthetic.", None, None],
+]
+
+# table -> (real sheet name, tag, rows)
+STLMT_SHEET_BY_TABLE = {
+    "stlmt_table_1": ("Table 1 - Historical Benchmark", "1", stlmt_matrix("1", ("BY1", "BY2", "BY3"))),
+    "stlmt_table_1a": ("Table 1A - Regional Adjustment", "1A", stlmt_matrix("1A")),
+    "stlmt_table_1b": ("Table 1B - Prior Savings Adj", "1B", stlmt_matrix("1B")),
+    "stlmt_table_1c": ("Table 1C - Population Adj", "1C", stlmt_matrix("1C")),
+    "stlmt_table_2": ("Table 2 - Updated Benchmark", "2", STLMT_TABLE_2),
+    "stlmt_table_3": ("Table 3 - Shared Savings Losses", "3", STLMT_TABLE_3),
+    "stlmt_table_a1": ("Table A1 - Risk", "A1", STLMT_TABLE_A1),
+    "stlmt_table_a2": ("Table A2 - Renormalization", "A2", stlmt_matrix("A2")),
+    "stlmt_table_a3": ("Table A3 - Trend & Update", "A3", stlmt_matrix("A3")),
+    "stlmt_table_a4": ("Table A4 - MSR", "A4", stlmt_matrix("A4")),
+    "stlmt_table_a5": ("Table A5 - Inputs by Track", "A5", stlmt_matrix("A5")),
+    "stlmt_table_a6": ("Table A6 - ACPT", "A6", stlmt_matrix("A6", ("BY3", "PY1", "PY2"))),
+}
+
+
+def stlmt_sheets(with_table_a6: bool = True) -> dict:
+    sheets = {
+        "Cover": [["Cover page"]],
+        "TOC": [["Table of Contents", "Sheet"], ["Table 1", "Table 1 - Historical Benchmark"]],
+        "Glossary": [["Term", "Definition"], ["MSR", "Minimum savings rate"]],
+        "Parameters": PARAMETERS,
+    }
+    for table, (sheet_name, _tag, rows) in STLMT_SHEET_BY_TABLE.items():
+        if table == "stlmt_table_a6" and not with_table_a6:
+            continue
+        sheets[sheet_name] = rows
+    return sheets
 
 
 def make_stlmt_bundle(
@@ -53,17 +172,23 @@ def make_stlmt_bundle(
     file_time_str: Optional[str] = None,
     notices=(),
     aco: str = ACO_ID,
+    with_table_a6: bool = True,
 ) -> Path:
-    """Build one settlement bundle holding the performance year's AEXPU::
+    """Build one settlement bundle::
 
         raw_dir/T0000/{year}/{code}/P.T0000.ACO.STLMT.D{date}.T{time}/
-            P.T0000.ACO.AEXPU.Y{year}.D{date}.T{file_time}.xlsx
+            P.T0000.ACO.STLMT.Y{year}.D{date}.T{file_time}.xlsx  <- STLMTProcessor
+            P.T0000.ACO.AEXPU.Y{year}.D{date}.T{file_time}.xlsx  <- AEXPUProcessor
             [<notice> ...]                 <- optional FinRec notice file(s)
 
     ``file_time_str`` defaults to the bundle's own T stamp.
     """
     bundle = raw_dir / aco / year / code / f"P.{aco}.ACO.STLMT.D{date_str}.T{time_str}"
     file_stamp = f"D{date_str}.T{file_time_str or time_str}"
+    write_workbook(
+        bundle / f"P.{aco}.ACO.STLMT.Y{year}.{file_stamp}.xlsx",
+        stlmt_sheets(with_table_a6),
+    )
     write_workbook(
         bundle / f"P.{aco}.ACO.AEXPU.Y{year}.{file_stamp}.xlsx", aexpu_sheets(year)
     )

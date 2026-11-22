@@ -86,7 +86,7 @@ class SectionedSheetProcessor(FileProcessor):
     every CMS sheet seen to date starts at row 1.
     """
 
-    # Concrete subclasses (BNMRK/AEXPU/QEXPU) override this.
+    # Concrete subclasses (BNMRK/AEXPU/QEXPU/STLMT) override this.
     SHEET_DEFS: List[SheetDef] = []
 
     def __init__(self, session, exporter, config):
