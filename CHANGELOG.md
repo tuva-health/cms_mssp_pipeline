@@ -53,11 +53,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`tests/e2e/fixtures/workbooks/`) for the connector's ACO `A0000`, and a
   new test checks that the processors parse them back into exactly those
   rows, so the connector's `scripts/dbt-pipeline-e2e` can build its
-  benchmark facts on pipeline output. The STLMT test workbook keeps its
-  synthetic sections, row labels and columns, but its Table 2, 3 and A1
-  values now agree: Table 2 `[I]` is the person-year-weighted `[H]`, and
-  Table A1 `[F]` is the performance-year score over the BY3 score, which is
-  the BNMRK fixture's. No output table changes.
+  benchmark facts on pipeline output. The STLMT test workbook's values
+  were made to agree across Tables 2, 3 and A1, with Table A1's BY3 scores
+  taken from the BNMRK fixture. TUVA-167 then rebuilt that workbook in the
+  real CMS layout, keeping those values (see Added). No output table changes.
 
 - **Breaking:** files in a final settlement (STLMT) bundle get their own
   `SUBMISSION_ID`: `STLMT.` plus the bundle directory's stamp, for example

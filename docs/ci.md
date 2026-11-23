@@ -44,7 +44,7 @@ holds, all with fake values:
 | Stage | Task | Gate after it |
 | --- | --- | --- |
 | `process` | the real `mssp-process` with `MSSP_OUTPUT_TYPE=PARQUET` | readiness (`bootstrap`, `whitelist`), exact image digest + task revision before launch |
-| `load` | every Parquet output loaded into a local DuckDB (`raw_data`) | output contract: the twenty relations of `contracts/workbook/v1.json`, read through `InformationSchemaOutputSource` |
+| `load` | every Parquet output loaded into a local DuckDB (`raw_data`) | output contract: the thirty-three relations of `contracts/workbook/v1.json`, read through `InformationSchemaOutputSource` |
 | `conformance` | every contracted table checked column-for-column and type-for-type against the contract; CCLF row counts; every raw CCLF table carries the columns medicare_cclf_connector's sources declare | task exit code |
 
 The clean run must pass; then each injected fault must halt the sequence at
