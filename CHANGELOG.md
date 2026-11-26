@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-25
+
+This release is required for cms_mssp_connector v1.1.0, which reads the
+STLMT tables at workbook contract 1.3.0 and runs medicare_cclf_connector
+v1.0.3 through cms_alr_connector v1.2.0. Release the two together.
+
 ### Added
 
 - **Breaking for STLMT readers:** the settlement workbook loads in its real
@@ -47,6 +53,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The vendored CCLF source contract moves to medicare_cclf_connector
+  v1.0.3, at `contracts/medicare_cclf_connector/v1.0.3/_sources.yml`. Its
+  `models/_sources.yml` is unchanged from v1.0.2.
 - Tests only: the synthetic e2e delivery now matches cms_mssp_connector's
   integration seeds (TUVA-165). Its BNMRK, AEXPU and QEXPU workbooks are
   rendered from a copy of the connector's workbook seeds
@@ -296,7 +305,8 @@ client dev and prod deployment on 2026-09-03/04.
   image, so the in-container verification no longer fails on the excluded
   macOS binary.
 
-[Unreleased]: https://github.com/tuva-health/cms_mssp_pipeline/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/tuva-health/cms_mssp_pipeline/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/tuva-health/cms_mssp_pipeline/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/tuva-health/cms_mssp_pipeline/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/tuva-health/cms_mssp_pipeline/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/tuva-health/cms_mssp_pipeline/releases/tag/v0.2.0

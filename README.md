@@ -412,7 +412,7 @@ The processing subsystem handles 11 MSSP ACO file types automatically. Files are
 
 | File type | Description | Format | Output tables |
 |---|---|---|---|
-| CCLF | Comprehensive Claim & Line Feed (IP v43 layouts) | Fixed-width text | `parta_*`, `partb_*`, `partd_claims`, `beneficiary_*` (CCLF1–9, CCLFA `parta_demo_codes`, CCLFB `partb_demo_codes`), named as medicare_cclf_connector v1.0.2's sources; plus `CCLF0_SUMMARY_STATS_HEADER_RECORD` |
+| CCLF | Comprehensive Claim & Line Feed (IP v43 layouts) | Fixed-width text | `parta_*`, `partb_*`, `partd_claims`, `beneficiary_*` (CCLF1–9, CCLFA `parta_demo_codes`, CCLFB `partb_demo_codes`), named as medicare_cclf_connector v1.0.3's sources; plus `CCLF0_SUMMARY_STATS_HEADER_RECORD` |
 | MSSP (ALR / BEUR / BAIP / NCBP) | Assignment and financial reports | CSV in zip | `AALR1_ASSIGNED_BENEFICIARIES`, `BEUR_*`, and others |
 | MCQM | Medicare Clinical Quality Measures | XLSX in zip through PY2025; CSV files in nested MCQM zip starting PY2026 | `MCQM_BENEFICIARIES`, `MCQM_DM_001SSP`, and others |
 | BNMRK | Historical Benchmark | XLSX | `BNMRK_TABLE_1`, `BNMRK_TABLE_1A`, `BNMRK_TABLE_1B`, `BNMRK_TABLE_1C`, `BNMRK_TABLE_2`–`BNMRK_TABLE_6`, `BNMRK_PARAMETERS` |
@@ -502,6 +502,7 @@ This pipeline writes the raw tables [cms_mssp_connector](https://github.com/tuva
 
 | cms_mssp_pipeline | cms_mssp_connector | medicare_cclf_connector (via cms_alr_connector) |
 |---|---|---|
+| v0.5.0 | v1.1.0 | v1.0.3 (cms_alr_connector v1.2.0) |
 | v0.4.0 | v1.0.1 | v1.0.2 (cms_alr_connector v1.1.1) |
 
 A pipeline release that supports a new connector release refreshes the vendored CCLF source contract in the same release (*Releases*, below).
@@ -536,7 +537,7 @@ Release assets:
 
 ### The vendored CCLF source contract
 
-`contracts/medicare_cclf_connector/<tag>/_sources.yml` is medicare_cclf_connector's `models/_sources.yml` at the tag cms_mssp_connector resolves (today `v1.0.2`, through cms_alr_connector). The `test` and `e2e` jobs check the raw CCLF tables against it. **Refresh it whenever cms_mssp_connector moves to a different medicare_cclf_connector version**, in the same pipeline release that supports that connector release. From a medicare_cclf_connector clone with the new tag fetched:
+`contracts/medicare_cclf_connector/<tag>/_sources.yml` is medicare_cclf_connector's `models/_sources.yml` at the tag cms_mssp_connector resolves (today `v1.0.3`, through cms_alr_connector). The `test` and `e2e` jobs check the raw CCLF tables against it. **Refresh it whenever cms_mssp_connector moves to a different medicare_cclf_connector version**, in the same pipeline release that supports that connector release. From a medicare_cclf_connector clone with the new tag fetched:
 
 ```bash
 TAG=vX.Y.Z CLONE=../medicare_cclf_connector

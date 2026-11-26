@@ -58,10 +58,10 @@ def test_matching_tables_pass_and_extra_metadata_columns_are_allowed():
 
 def test_missing_source_table_column_and_unknown_table_are_violations():
     assert source_column_violations({}, DECLARED) == [
-        "parta_demo_codes: medicare_cclf_connector v1.0.2 source not written"
+        "parta_demo_codes: medicare_cclf_connector v1.0.3 source not written"
     ]
     assert source_column_violations({"parta_demo_codes": ["cur_clm_uniq_id"]}, DECLARED) == [
-        "parta_demo_codes: missing medicare_cclf_connector v1.0.2 source columns ['file_name']"
+        "parta_demo_codes: missing medicare_cclf_connector v1.0.3 source columns ['file_name']"
     ]
     renamed = {
         "parta_demo_codes": ["cur_clm_uniq_id", "file_name"],
@@ -69,7 +69,7 @@ def test_missing_source_table_column_and_unknown_table_are_violations():
     }
     assert source_column_violations(renamed, DECLARED) == [
         "claims_benefit_enhancement_and_demonstration_code_file_cclfa: "
-        "written, but not a medicare_cclf_connector v1.0.2 source"
+        "written, but not a medicare_cclf_connector v1.0.3 source"
     ]
 
 
