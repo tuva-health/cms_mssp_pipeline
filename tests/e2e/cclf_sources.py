@@ -17,7 +17,7 @@ from pathlib import Path
 
 import yaml
 
-CONNECTOR_TAG = "v1.0.2"
+CONNECTOR_TAG = "v1.0.3"
 # git rev-parse <tag>:models/_sources.yml (== git hash-object on the copy)
 SOURCES_BLOB = "1b002460ad5b9dc45a8facbb482a59c711b4459e"
 SOURCES_PATH = (
