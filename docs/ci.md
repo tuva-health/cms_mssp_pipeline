@@ -16,7 +16,7 @@ one only together with the protection rule.
 
 | Job | What it proves |
 | --- | --- |
-| `test` | `uv sync --frozen` (the `dev` dependency group carries every import the tests need, so no extras are installed) then `uv run --frozen pytest`, run in sequence on Python 3.10 (the `requires-python` floor) and 3.11 (the runtime image's interpreter) so the check keeps a single stable name. The suite covers the processing engine, the sequencer, the lease backends (against moto), the render goldens, and the genericity guard that keeps client literals out of this repository. |
+| `test` | `uv sync --frozen` (the `dev` dependency group carries every import the tests need, so no extras are installed) then `uv run --frozen pytest`, run in sequence on Python 3.10 (the `requires-python` floor) and 3.11 (the runtime image's interpreter) so the check keeps a single stable name. The suite covers the processing engine, the sequencer, the lease backends (against moto), the render goldens, the e2e workbook fixtures' round trip through the processors (`tests/e2e/test_cms_workbooks.py`), and the genericity guard that keeps client literals out of this repository. |
 | `lock` | `uv lock --check`: `uv.lock` is consistent with `pyproject.toml`, so the frozen image install is a function of the checkout alone. |
 | `terraform` | `terraform fmt -check -recursive`, then `terraform init -backend=false` and `terraform validate` for every root under `infra/terraform/aws/` (`foundation`, `bootstrap`, `activate`, `modules/lease-table`). Terraform version comes from `.terraform-version`. |
 | `shell` | `shellcheck scripts/*.sh docker/*.sh` at the default severity. |
@@ -25,15 +25,26 @@ one only together with the protection rule.
 ## Synthetic end-to-end job (`e2e`, not required)
 
 `e2e` runs `tests/e2e/synthetic_run.py`: it writes a synthetic CMS delivery
-(the openpyxl BNMRK / AEXPU / QEXPU workbook fixtures plus one small
-fixed-width file per CCLF type, all fake values) and drives a three-stage plan
+for ACO `A0000` and drives a three-stage plan
 through the real sequencer engine with the in-memory lease store, a synthetic
-readiness source and a fake ECS client whose tasks run locally:
+readiness source and a fake ECS client whose tasks run locally. The delivery
+holds, all with fake values:
+
+- the CMS-consistent BNMRK / AEXPU / QEXPU workbooks that cms_mssp_connector's
+  integration seeds describe, rendered by `tests/e2e/cms_workbooks.py` from a
+  copy of those seeds (see README, *The vendored workbook fixtures*). The
+  connector's `scripts/dbt-pipeline-e2e` builds its benchmark facts on this
+  output;
+- a STLMT settlement bundle from the test builder in
+  `tests/processing/test_settlement_submission.py`. Its workbook
+  (`tests/processing/stlmt_workbook.py`) has the real CMS layout, and its
+  values agree across tables the way a real settlement's do;
+- one small fixed-width file per CCLF type.
 
 | Stage | Task | Gate after it |
 | --- | --- | --- |
 | `process` | the real `mssp-process` with `MSSP_OUTPUT_TYPE=PARQUET` | readiness (`bootstrap`, `whitelist`), exact image digest + task revision before launch |
-| `load` | every Parquet output loaded into a local DuckDB (`raw_data`) | output contract: the twenty relations of `contracts/workbook/v1.json`, read through `InformationSchemaOutputSource` |
+| `load` | every Parquet output loaded into a local DuckDB (`raw_data`) | output contract: the thirty-three relations of `contracts/workbook/v1.json`, read through `InformationSchemaOutputSource` |
 | `conformance` | every contracted table checked column-for-column and type-for-type against the contract; CCLF row counts; every raw CCLF table carries the columns medicare_cclf_connector's sources declare | task exit code |
 
 The clean run must pass; then each injected fault must halt the sequence at

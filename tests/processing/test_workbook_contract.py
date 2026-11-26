@@ -1,8 +1,8 @@
 """Export-conformance tests for the workbook v1 contract.
 
 `contracts/workbook/v1.json` publishes the canonical, machine-readable
-20-relation cell-grain workbook API: version, the twenty BNMRK / AEXPU / QEXPU
-relations, their shared cell-grain schema (grammar plus path-derived metadata
+33-relation cell-grain workbook API: version, the thirty-three BNMRK / AEXPU /
+QEXPU / STLMT relations, their shared cell-grain schema (grammar plus path-derived metadata
 columns), optional-sheet behavior, and the accepted output set.
 
 These tests assert two independent things:
@@ -12,13 +12,15 @@ These tests assert two independent things:
    ``*_SHEET_DEFS`` in the repo, never invented, so a def that drifts from the
    published contract fails here.
 
-2. The *exports conform to the contract* — the three concrete processors are run
+2. The *exports conform to the contract* — the four concrete processors are run
    against synthetic (non-PHI) fixtures and every materialised table is checked,
    column-for-column and type-for-type, against the schema the contract declares
-   for it, including the zero-row shape an absent optional sheet produces.
+   for it (cell_grain, or stlmt_cell_grain for the settlement relations),
+   including the zero-row shape an absent optional sheet produces.
 
 The synthetic fixtures are reused verbatim from
-``test_aco_workbook_processors.py`` so no agreement data appears here.
+``test_aco_workbook_processors.py`` and ``test_settlement_submission.py`` so no
+agreement data appears here.
 """
 
 import importlib
@@ -31,10 +33,12 @@ import pytest
 from mssp_pipeline.processing.defs.aexpu_file_defs import AEXPU_SHEET_DEFS
 from mssp_pipeline.processing.defs.bnmrk_file_defs import BNMRK_SHEET_DEFS
 from mssp_pipeline.processing.defs.qexpu_file_defs import QEXPU_SHEET_DEFS
+from mssp_pipeline.processing.defs.stlmt_file_defs import STLMT_SHEET_DEFS
 
 from mssp_pipeline.processing.processors.aexpu_processor import AEXPUProcessor
 from mssp_pipeline.processing.processors.bnmrk_processor import BNMRKProcessor
 from mssp_pipeline.processing.processors.qexpu_processor import QEXPUProcessor
+from mssp_pipeline.processing.processors.stlmt_processor import STLMTProcessor
 
 from .test_aco_workbook_processors import (
     config_for,
@@ -42,6 +46,7 @@ from .test_aco_workbook_processors import (
     make_qexpu_bundle,
     run,
 )
+from .test_settlement_submission import make_stlmt_bundle
 
 # ---------------------------------------------------------------------------
 # Contract location + independent source of truth
@@ -58,6 +63,7 @@ DEFS_BY_FAMILY = {
     "BNMRK": BNMRK_SHEET_DEFS,
     "AEXPU": AEXPU_SHEET_DEFS,
     "QEXPU": QEXPU_SHEET_DEFS,
+    "STLMT": STLMT_SHEET_DEFS,
 }
 
 EXPECTED_RELATIONS = {
@@ -65,10 +71,13 @@ EXPECTED_RELATIONS = {
 }
 
 # Sheets that are legitimately absent from some conforming deliveries, documented
-# in the defs/processors: BNMRK Table 6 (June/October only) and the AEXPU COVID
-# variants (benchmark years BY1/BY2 only). Everything else is expected in every
-# delivery. This literal is the independent truth for the ``optional`` flag.
-EXPECTED_OPTIONAL = {"BNMRK_TABLE_6", "AEXPU_TABLE_1A", "AEXPU_TABLE_4A"}
+# in the defs/processors: BNMRK Table 6 (June/October only), the AEXPU COVID
+# variants (benchmark years BY1/BY2 only) and STLMT Table A6 (ACPT agreements
+# only). Everything else is expected in every delivery. This literal is the
+# independent truth for the ``optional`` flag.
+EXPECTED_OPTIONAL = {
+    "BNMRK_TABLE_6", "AEXPU_TABLE_1A", "AEXPU_TABLE_4A", "STLMT_TABLE_A6",
+}
 
 
 @pytest.fixture(scope="module")
@@ -84,18 +93,18 @@ def contract():
 
 def test_contract_declares_an_exact_version(contract):
     """The contract is exactly versioned — v1 is pinned, not open-ended."""
-    assert contract["version"] == "1.0.0"
+    assert contract["version"] == "1.3.0"
     assert contract["grain"] == "cell"
 
 
-def test_contract_declares_exactly_the_twenty_relations(contract):
-    """Twenty relations, matching the BNMRK/AEXPU/QEXPU defs one-for-one.
+def test_contract_declares_exactly_the_thirty_three_relations(contract):
+    """Thirty-three relations, matching the BNMRK/AEXPU/QEXPU/STLMT defs one-for-one.
 
     Derived from the concrete ``*_SHEET_DEFS`` so a relation added to or removed
     from the code without updating the published contract fails here.
     """
     declared = {r["relation"] for r in contract["relations"]}
-    assert len(contract["relations"]) == 20
+    assert len(contract["relations"]) == 33
     assert declared == set(EXPECTED_RELATIONS)
 
 
@@ -118,10 +127,39 @@ def test_optional_relations_are_exactly_the_documented_optional_sheets(contract)
     assert declared_optional == EXPECTED_OPTIONAL
 
 
-def test_accepted_output_set_is_all_twenty_relations(contract):
-    """The audit-preserving benchmark graph is the full set of twenty relations."""
+def test_optional_flags_match_the_defs(contract):
+    """A def's ``optional`` decides whether its absence fails the run, so the
+    contract's flag must say exactly the same."""
+    for r in contract["relations"]:
+        _, sheet_def = EXPECTED_RELATIONS[r["relation"]]
+        assert r.get("optional", False) == sheet_def.optional, r["relation"]
+
+
+def test_stlmt_relations_use_the_layout_schema(contract):
+    """STLMT relations carry cell_grain plus the three layout columns, in the
+    order the processor emits them; every other relation carries cell_grain."""
+    cell = [c["name"] for c in contract["schemas"]["cell_grain"]["columns"]]
+    stlmt = [c["name"] for c in contract["schemas"]["stlmt_cell_grain"]["columns"]]
+    assert [c for c in stlmt if c not in cell] == ["block_label", "row_kind", "column_code"]
+    assert [c for c in stlmt if c in cell] == cell
+    for r in contract["relations"]:
+        expected = "stlmt_cell_grain" if r["family"] == "STLMT" else "cell_grain"
+        assert r["schema"] == expected, r["relation"]
+    # The shared columns are declared twice; they must not drift. Only
+    # column_label's description differs, because it loses its column code.
+    cell_defs = {c["name"]: c for c in contract["schemas"]["cell_grain"]["columns"]}
+    for c in contract["schemas"]["stlmt_cell_grain"]["columns"]:
+        if c["name"] in cell_defs:
+            keys = {"name", "type", "role", "nullable"} | (
+                set() if c["name"] == "column_label" else {"description"}
+            )
+            assert {k: c[k] for k in keys} == {k: cell_defs[c["name"]][k] for k in keys}, c["name"]
+
+
+def test_accepted_output_set_is_all_thirty_three_relations(contract):
+    """The audit-preserving benchmark graph is the full set of thirty-three relations."""
     assert set(contract["accepted_output_set"]) == set(EXPECTED_RELATIONS)
-    assert len(contract["accepted_output_set"]) == 20
+    assert len(contract["accepted_output_set"]) == 33
 
 
 # ---------------------------------------------------------------------------
@@ -197,23 +235,25 @@ def _table_exists(conn, table):
 
 @pytest.fixture
 def all_exports(test_session, raw_dir):
-    """Run all three processors over a full synthetic store; return the connection.
+    """Run all four processors over a full synthetic store; return the connection.
 
     The BNMRK bundle carries the BNMRK workbook plus one AEXPU workbook per
-    benchmark year (BY1/BY2 include the COVID variants, BY3 omits them), and the
-    QEXPU bundle carries the quarterly workbook — between them every one of the
-    twenty relations has a source sheet to materialise from.
+    benchmark year (BY1/BY2 include the COVID variants, BY3 omits them), the
+    QEXPU bundle carries the quarterly workbook, and the settlement bundle the
+    STLMT workbook — between them every one of the thirty-three relations has a
+    source sheet to materialise from.
     """
     make_bnmrk_bundle(raw_dir)
     make_qexpu_bundle(raw_dir)
+    make_stlmt_bundle(raw_dir)
     config = config_for(raw_dir)
-    for processor_cls in (BNMRKProcessor, AEXPUProcessor, QEXPUProcessor):
+    for processor_cls in (BNMRKProcessor, AEXPUProcessor, QEXPUProcessor, STLMTProcessor):
         run(processor_cls, test_session, config)
     return test_session.connection
 
 
 def test_every_relation_in_the_accepted_output_set_materialises(all_exports, contract):
-    """All twenty declared relations are produced from a full delivery."""
+    """All thirty-three declared relations are produced from a full delivery."""
     produced = {
         row[0]
         for row in all_exports.execute(

@@ -1,5 +1,6 @@
 import re
-from typing import Dict, List, Optional, Sequence, Tuple
+from dataclasses import dataclass
+from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 import duckdb
 
@@ -19,11 +20,22 @@ _FOOTNOTE_SUFFIX_RE = r"\[\d+\]\s*$"
 # spelled out; CMS headers also carry embedded newlines and tabs.
 _WHITESPACE_RE = "[\\s\u00a0]+"
 
+# Zero-width characters, removed outright before whitespace is collapsed. The
+# settlement workbook's headers carry U+200B beside real whitespace
+# ('Risk Score Weights\u00a0\u200b\n[A]'); turning it into a space would split
+# a word wherever it sits inside one.
+_ZERO_WIDTH_RE = "[\u200b\u200c\u200d\ufeff]"
+
 # A footnote *definition* row, e.g. '[10]See "Parameters" tab for details.'
 _FOOTNOTE_ROW_RE = r"^\s*\[\d+\]"
 
+# The name Excel gives a blank header cell of a table (ListObject): 'Column1',
+# 'Column2', ... It labels a spacer column, not data.
+_PY_PLACEHOLDER_HEADER_RE = re.compile(r"Column\d+")
+
 _PY_FOOTNOTE_SUFFIX_RE = re.compile(_FOOTNOTE_SUFFIX_RE)
 _PY_WHITESPACE_RE = re.compile(_WHITESPACE_RE)
+_PY_ZERO_WIDTH_RE = re.compile(_ZERO_WIDTH_RE)
 
 # Grammar columns emitted ahead of the file metadata, with the types the real
 # query produces. Used to synthesise an empty result for a batch that
@@ -38,6 +50,46 @@ _OUTPUT_COLUMNS: List[Tuple[str, str]] = [
     ("COLUMN_LABEL", "VARCHAR"),
     ("VALUE_TEXT", "VARCHAR"),
 ]
+
+# The same, for a processor with LAYOUT_COLUMNS: BLOCK_LABEL, ROW_KIND and
+# COLUMN_CODE join the grammar columns.
+_LAYOUT_OUTPUT_COLUMNS: List[Tuple[str, str]] = [
+    ("ROW_NUM", "BIGINT"),
+    ("BLOCK_LABEL", "VARCHAR"),
+    ("GROUP_LABEL", "VARCHAR"),
+    ("SECTION_CODE", "VARCHAR"),
+    ("SECTION_LABEL", "VARCHAR"),
+    ("ROW_LABEL", "VARCHAR"),
+    ("ROW_KIND", "VARCHAR"),
+    ("COLUMN_GROUP_LABEL", "VARCHAR"),
+    ("COLUMN_CODE", "VARCHAR"),
+    ("COLUMN_LABEL", "VARCHAR"),
+    ("VALUE_TEXT", "VARCHAR"),
+]
+
+# A letter code closing a header label: 'Final Risk Ratio (Capped) [I]'.
+_PY_COLUMN_CODE_RE = re.compile(r"^(.*\S)\s*\[([A-Z]{1,2})\]$")
+
+
+class _ValueColumn(NamedTuple):
+    """One value column of the unpivot: source column and its header labels."""
+
+    source: str
+    group: Optional[str]
+    label: str
+    code: Optional[str]
+
+
+@dataclass(frozen=True)
+class _SheetLayout:
+    """Per-sheet facts the layout-aware SELECT needs, read from the header."""
+
+    # Column A's header label when column A is data (SheetDef.label_column_is_data).
+    label_column_header: Optional[str] = None
+    # SheetDef.blocks: the first block's title, and every cell of the header
+    # row, [(column, normalized text)], so a repeat of it can be recognised.
+    first_block_label: Optional[str] = None
+    header_cells: Tuple[Tuple[str, Optional[str]], ...] = ()
 
 
 class SectionedSheetProcessor(FileProcessor):
@@ -86,8 +138,25 @@ class SectionedSheetProcessor(FileProcessor):
     every CMS sheet seen to date starts at row 1.
     """
 
-    # Concrete subclasses (BNMRK/AEXPU/QEXPU) override this.
+    # Concrete subclasses (BNMRK/AEXPU/QEXPU/STLMT) override this.
     SHEET_DEFS: List[SheetDef] = []
+
+    # Emit the layout grammar the settlement workbook needs (TUVA-167):
+    #
+    #   BLOCK_LABEL  the title of the block a row sits in, on a SheetDef with
+    #                blocks=True (settlement Table A2); NULL elsewhere.
+    #   ROW_KIND     'CODE'   the lettered row itself ('[I] Updated Benchmark');
+    #                'DETAIL' a row under a lettered or group heading (an
+    #                         enrollment type, a grid row, a parameter);
+    #                'TOTAL'  an unlettered row repeating its section's label,
+    #                         which closes the section with its total.
+    #   COLUMN_CODE  the letter closing a header label ('... [I]' -> 'I'),
+    #                which is cut from COLUMN_LABEL; NULL elsewhere.
+    #
+    # A lettered row with no values is kept (its cells NULL) unless it heads
+    # detail rows, in which case it is only a heading. Off by default, so the
+    # BNMRK / AEXPU / QEXPU output is unchanged.
+    LAYOUT_COLUMNS: bool = False
 
     def __init__(self, session, exporter, config):
         super().__init__(session, exporter, config)
@@ -136,7 +205,8 @@ class SectionedSheetProcessor(FileProcessor):
         """Return the one sheet name matching sheet_pattern, or None if absent.
 
         Not every delivery carries every sheet (BNMRK "Table 6 - ACPT" is only
-        present for ACOs on the ACPT methodology), so a miss is not an error.
+        present for ACOs on the ACPT methodology), so a miss is not an error
+        here; _build_query() fails the table unless the SheetDef is optional.
         An ambiguous pattern is: 'Table 1%' also matches 'Table 1A - ...' and
         'Table 1B - ...', and silently reading the wrong sheet is far worse than
         failing, so multiple matches raise.
@@ -167,14 +237,22 @@ class SectionedSheetProcessor(FileProcessor):
 
         A read error is deliberately not cached: _build_query() relies on the
         duckdb.Error propagating so it can report the file as unopenable.
+
+        The names come from analyze_sheets(), which inspects each sheet on its
+        own and reads no cell data. A combined read_sheets() over the workbook
+        must not be used for this: it skips as many leading rows on every later
+        sheet as the first sheet's content starts below row 1, and a sheet no
+        taller than that drops out of the result entirely. On a real settlement
+        workbook that silently lost Tables 1C, A1 and A5 (TUVA-167).
+        union_by_name=true avoids the drop but raises when two sheets infer
+        different types for a column of the same name.
         """
         if xlsx_path not in self._sheet_names_cache:
             self._sheet_names_cache[xlsx_path] = [
                 row[0]
                 for row in self.session.connection.execute(f"""
                     SELECT DISTINCT sheet_name
-                    FROM read_sheets([{sql_string_literal(xlsx_path)}],
-                                     sheet_name_column='sheet_name')
+                    FROM analyze_sheets([{sql_string_literal(xlsx_path)}])
                 """).fetchall()
             ]
         return self._sheet_names_cache[xlsx_path]
@@ -190,8 +268,9 @@ class SectionedSheetProcessor(FileProcessor):
         header rows and their column labels have to be read from each workbook
         before the unpivot SQL for that workbook can be written.
 
-        run() calls this once per *batch*, so "no matching sheet" is normal: the
-        Table-6-less BNMRK deliveries may well fill a whole batch. Such a batch
+        run() calls this once per *batch*, so for an optional sheet "no matching
+        sheet" is normal: the Table-6-less BNMRK deliveries may well fill a
+        whole batch. A required sheet missing from any file raises. Such a batch
         returns a zero-row query of the right shape rather than failing the table.
         Only a batch in which every file failed to open is an error.
 
@@ -216,6 +295,12 @@ class SectionedSheetProcessor(FileProcessor):
                     open_failures.append(f"{xlsx_path}: {e}")
                     continue
                 if not exact_sheet:
+                    if not file_def.optional:
+                        raise RuntimeError(
+                            f"Required sheet {file_def.sheet_pattern!r} is missing "
+                            f"from {xlsx_path} ({file_def.table_name}). Only a "
+                            f"SheetDef marked optional may be absent."
+                        )
                     continue
 
                 raw = validate_identifier(
@@ -262,13 +347,17 @@ class SectionedSheetProcessor(FileProcessor):
     def _empty_batch_query(self, xlsx_path: str) -> str:
         """A zero-row SELECT with exactly the output schema of a real batch."""
         grammar = ", ".join(
-            f"CAST(NULL AS {sql_type}) AS {name}" for name, sql_type in _OUTPUT_COLUMNS
+            f"CAST(NULL AS {sql_type}) AS {name}"
+            for name, sql_type in self._output_columns()
         )
         metadata = "".join(
             f", {expr} AS {validate_identifier(name, field_name='metadata column')}"
             for name, expr in self._file_metadata_sql(xlsx_path).items()
         )
         return f"SELECT {grammar}{metadata} WHERE FALSE"
+
+    def _output_columns(self) -> List[Tuple[str, str]]:
+        return _LAYOUT_OUTPUT_COLUMNS if self.LAYOUT_COLUMNS else _OUTPUT_COLUMNS
 
     # ------------------------------------------------------------------
     # Per-sheet SQL
@@ -288,7 +377,9 @@ class SectionedSheetProcessor(FileProcessor):
         label_col = columns[0] if columns else "A"
         value_cols = columns[1:]
 
+        self._check_layout_options(file_def)
         skip_notes_scan = False
+        layout = _SheetLayout()
         if file_def.synthetic_column_labels is not None:
             retained = _synthetic_header(value_cols, file_def.synthetic_column_labels)
             if not retained:
@@ -320,13 +411,73 @@ class SectionedSheetProcessor(FileProcessor):
                 raise self._no_header_error(file_def, xlsx_path, exact_sheet)
 
             last_header_row = header_row + 1 if continuation is not None else header_row
+            layout = self._sheet_layout(raw, label_col, header_row, file_def)
+            if layout.label_column_header is not None:
+                retained = [(label_col, None, layout.label_column_header), *retained]
 
         notes_row = None
         if not file_def.include_notes and not skip_notes_scan:
             notes_row = self._find_notes_row(raw, label_col, last_header_row)
 
         return self._render_select(
-            raw, label_col, retained, last_header_row, notes_row, file_def, xlsx_path
+            raw, label_col, retained, last_header_row, notes_row, file_def,
+            xlsx_path, layout,
+        )
+
+    def _check_layout_options(self, file_def: SheetDef) -> None:
+        """The settlement layout options need the layout columns: without them
+        BLOCK_LABEL does not exist and the options would only half-apply."""
+        options = [
+            name for name in ("heading_cells_are_labels", "blocks", "label_column_is_data")
+            if getattr(file_def, name)
+        ]
+        if options and not self.LAYOUT_COLUMNS:
+            raise RuntimeError(
+                f"{file_def.table_name}: {', '.join(options)} needs a processor "
+                f"with LAYOUT_COLUMNS = True"
+            )
+
+    def _sheet_layout(
+        self, raw: str, label_col: str, header_row: int, file_def: SheetDef
+    ) -> _SheetLayout:
+        """Read what label_column_is_data and blocks need from the header."""
+        if not (file_def.label_column_is_data or file_def.blocks):
+            return _SheetLayout()
+
+        conn = self.session.connection
+
+        def column_a(row_num: int) -> Optional[str]:
+            row = conn.execute(
+                f"SELECT {label_col} FROM {raw} WHERE ROW_NUM = {int(row_num)}"
+            ).fetchone()
+            return _header_label(row[0]) if row else None
+
+        header_a = column_a(header_row)
+        if file_def.label_column_is_data:
+            if header_a is None:
+                raise RuntimeError(
+                    f"{file_def.table_name}: label_column_is_data needs a header "
+                    f"label in column A of row {header_row}"
+                )
+            return _SheetLayout(label_column_header=header_a)
+
+        title = column_a(header_row - 1) if header_row > 1 else None
+        if title is None:
+            raise RuntimeError(
+                f"{file_def.table_name}: blocks needs the first block's title in "
+                f"column A of the row directly above the header (row {header_row})"
+            )
+        # Every cell of the header row as normalized text, an Excel 'Column<n>'
+        # placeholder included, since the SQL repeat check sees it that way.
+        columns = [r[0] for r in conn.execute(f"DESCRIBE {raw}").fetchall() if r[0] != "ROW_NUM"]
+        cells = conn.execute(
+            f"SELECT {', '.join(columns)} FROM {raw} WHERE ROW_NUM = {int(header_row)}"
+        ).fetchone()
+        return _SheetLayout(
+            first_block_label=title,
+            header_cells=tuple(
+                (col, _normalize_label(cell)) for col, cell in zip(columns, cells)
+            ),
         )
 
     def _no_header_error(
@@ -344,7 +495,10 @@ class SectionedSheetProcessor(FileProcessor):
                 f"carrying column labels"
             )
         else:
-            detail = "need a row with 2+ non-blank cells beyond column A, or set header_row_hint"
+            detail = (
+                f"need a row with {file_def.min_header_cells}+ non-blank cells "
+                f"beyond column A, or set header_row_hint"
+            )
         return RuntimeError(
             f"No header row found in sheet {exact_sheet!r} of {xlsx_path} "
             f"for {file_def.table_name} ({detail})"
@@ -357,6 +511,10 @@ class SectionedSheetProcessor(FileProcessor):
 
         The >= 2 threshold matters: BNMRK "Table 6 - ACPT" carries a decorative
         row above the real header holding a single cell ("Performance Year").
+        A sheet with only one value column (settlement Table 3) cannot have two;
+        its SheetDef lowers min_header_cells to 1. That is opt-in, never inferred
+        from the column count: a key/value sheet has one value column too, and
+        its first value would be taken for a header.
         Returns None when no header row exists — including when header_row_hint
         falls outside the sheet — so the caller raises one consistent error.
         """
@@ -371,20 +529,25 @@ class SectionedSheetProcessor(FileProcessor):
 
         non_blank_count = " + ".join(_non_blank_flag(col) for col in value_cols)
         row = conn.execute(
-            f"SELECT MIN(ROW_NUM) FROM {raw} WHERE ({non_blank_count}) >= 2"
+            f"SELECT MIN(ROW_NUM) FROM {raw} "
+            f"WHERE ({non_blank_count}) >= {int(file_def.min_header_cells)}"
         ).fetchone()
         return int(row[0]) if row and row[0] is not None else None
 
     def _row_labels(
         self, raw: str, value_cols: List[str], row_num: int
     ) -> List[Optional[str]]:
-        """Normalized value-column cells of one row (None where blank/missing)."""
+        """Normalized header labels of one row (None where blank/missing).
+
+        Only header rows are read through here, so an Excel table's 'Column<n>'
+        placeholder counts as blank too.
+        """
         values = self.session.connection.execute(
             f"SELECT {', '.join(value_cols)} FROM {raw} WHERE ROW_NUM = {int(row_num)}"
         ).fetchone()
         if values is None:
             return [None] * len(value_cols)
-        return [_normalize_label(value) for value in values]
+        return [_header_label(value) for value in values]
 
     def _continuation_labels(
         self,
@@ -432,6 +595,7 @@ class SectionedSheetProcessor(FileProcessor):
         notes_row: Optional[int],
         file_def: SheetDef,
         xlsx_path: str,
+        layout: _SheetLayout,
     ) -> str:
         """Classify, forward-fill the two-level hierarchy, then unpivot.
 
@@ -439,7 +603,8 @@ class SectionedSheetProcessor(FileProcessor):
         each row that sets a section increments a counter, so FIRST_VALUE over
         that partition returns the setting row's own values. Unlike a plain
         IGNORE NULLS fill this correctly propagates a NULL SECTION_CODE, which
-        is what an unbracketed section row must produce.
+        is what an unbracketed section row must produce. Block titles
+        (SheetDef.blocks) are filled the same way.
         """
         label_norm = _normalized(label_col)
         code_expr = (
@@ -450,7 +615,8 @@ class SectionedSheetProcessor(FileProcessor):
             f"REGEXP_EXTRACT(CAST({label_col} AS VARCHAR), "
             f"{sql_string_literal(_SECTION_CODE_RE)}, 2)"
         )
-        value_col_list = ", ".join(col for col, _, _ in retained)
+        # Column A can be a value column too (SheetDef.label_column_is_data).
+        value_col_list = ", ".join(dict.fromkeys(col for col, _, _ in retained))
         non_blank_count = " + ".join(_non_blank_flag(col) for col, _, _ in retained)
 
         where = [f"ROW_NUM > {int(header_row)}"]
@@ -461,6 +627,13 @@ class SectionedSheetProcessor(FileProcessor):
                 f"NOT REGEXP_MATCHES(COALESCE(CAST({label_col} AS VARCHAR), ''), "
                 f"{sql_string_literal(_FOOTNOTE_ROW_RE)})"
             )
+        if layout.header_cells:
+            # A later block repeats the header row: it is not data.
+            repeat = " AND ".join(
+                f"{_normalized(col)} IS NOT DISTINCT FROM {_varchar_literal(label)}"
+                for col, label in layout.header_cells
+            )
+            where.append(f"NOT ({repeat})")
 
         metadata = self._file_metadata_sql(xlsx_path)
         metadata_sql = "".join(
@@ -468,20 +641,53 @@ class SectionedSheetProcessor(FileProcessor):
             for name, expr in metadata.items()
         )
 
-        column_groups = ", ".join(_varchar_literal(group) for _, group, _ in retained)
-        column_labels = ", ".join(_varchar_literal(label) for _, _, label in retained)
-        value_exprs = ", ".join(f"CAST({col} AS VARCHAR)" for col, _, _ in retained)
+        columns = [
+            _ValueColumn(
+                col, group,
+                *(_split_column_code(label) if self.LAYOUT_COLUMNS else (label, None)),
+            )
+            for col, group, label in retained
+        ]
+        column_groups = ", ".join(_varchar_literal(c.group) for c in columns)
+        column_labels = ", ".join(_varchar_literal(c.label) for c in columns)
+        column_codes = ", ".join(_varchar_literal(c.code) for c in columns)
+        value_exprs = ", ".join(f"CAST({c.source} AS VARCHAR)" for c in columns)
 
         # A bracketed row whose remainder is empty ("[A2]") still deserves a label.
         bracket_label = "COALESCE(_rest_norm, _code)"
+        blocks = "TRUE" if file_def.blocks else "FALSE"
+
+        if self.LAYOUT_COLUMNS:
+            # A lettered row is emitted, even blank, unless it only heads
+            # detail rows; with heading_cells_are_labels it never is when it does.
+            emit = "(NOT _is_section OR (_bracketed AND NOT _heads_detail))"
+            if file_def.heading_cells_are_labels:
+                emit += " AND NOT _heads_detail"
+            layout_head = (
+                f"COALESCE(BLOCK_LABEL, {_varchar_literal(layout.first_block_label)}) "
+                f"AS BLOCK_LABEL,\n                   GROUP_LABEL,"
+            )
+            row_kind = (
+                "CASE WHEN _bracketed THEN 'CODE' "
+                "WHEN SECTION_CODE IS NOT NULL AND ROW_LABEL = SECTION_LABEL THEN 'TOTAL' "
+                "ELSE 'DETAIL' END AS ROW_KIND,"
+            )
+            code_col = f"UNNEST([{column_codes}]) AS COLUMN_CODE,"
+        else:
+            emit = "NOT _is_section"
+            layout_head = "GROUP_LABEL,"
+            row_kind = ""
+            code_col = ""
 
         return f"""
             SELECT ROW_NUM,
-                   GROUP_LABEL,
+                   {layout_head}
                    SECTION_CODE,
                    SECTION_LABEL,
                    ROW_LABEL,
+                   {row_kind}
                    UNNEST([{column_groups}]) AS COLUMN_GROUP_LABEL,
+                   {code_col}
                    UNNEST([{column_labels}]) AS COLUMN_LABEL,
                    UNNEST([{value_exprs}]) AS VALUE_TEXT{metadata_sql}
             FROM (
@@ -494,37 +700,53 @@ class SectionedSheetProcessor(FileProcessor):
                            OVER (PARTITION BY _section_grp ORDER BY ROW_NUM) AS SECTION_LABEL,
                        FIRST_VALUE(_event_group)
                            OVER (PARTITION BY _group_grp ORDER BY ROW_NUM) AS GROUP_LABEL,
-                       _is_section
+                       FIRST_VALUE(_event_block)
+                           OVER (PARTITION BY _block_grp ORDER BY ROW_NUM) AS BLOCK_LABEL,
+                       _is_section, _bracketed, _heads_detail
                 FROM (
                     SELECT *,
                            SUM(CASE WHEN _is_section OR _bracketed THEN 1 ELSE 0 END)
                                OVER (ORDER BY ROW_NUM
                                      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
                                ) AS _section_grp,
-                           SUM(CASE WHEN _is_section AND NOT _bracketed THEN 1 ELSE 0 END)
+                           SUM(CASE WHEN _is_group THEN 1 ELSE 0 END)
                                OVER (ORDER BY ROW_NUM
                                      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
                                ) AS _group_grp,
+                           SUM(CASE WHEN _is_block_title THEN 1 ELSE 0 END)
+                               OVER (ORDER BY ROW_NUM
+                                     ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                               ) AS _block_grp,
+                           _bracketed AND COALESCE(
+                               LEAD(NOT _bracketed AND NOT _is_section)
+                                   OVER (ORDER BY ROW_NUM),
+                               FALSE
+                           ) AS _heads_detail,
                            CASE WHEN _bracketed THEN _code
                                 WHEN _is_section THEN NULL END AS _event_code,
                            CASE WHEN _bracketed THEN {bracket_label}
                                 WHEN _is_section THEN _label_norm END AS _event_label,
-                           CASE WHEN _is_section AND NOT _bracketed
-                                THEN _label_norm END AS _event_group
+                           CASE WHEN _is_group THEN _label_norm END AS _event_group,
+                           CASE WHEN _is_block_title THEN _label_norm END AS _event_block
                     FROM (
-                        SELECT ROW_NUM, {value_col_list},
-                               {label_norm} AS _label_norm,
-                               {code_expr} AS _code,
-                               {_normalized(rest_expr)} AS _rest_norm,
-                               {code_expr} <> '' AS _bracketed,
-                               ({non_blank_count}) = 0 AS _is_section
-                        FROM {raw}
-                        WHERE {' AND '.join(where)}
-                    ) _classified
-                    WHERE _label_norm IS NOT NULL
+                        SELECT *,
+                               _is_section AND NOT _bracketed AND {blocks} AS _is_block_title,
+                               _is_section AND NOT _bracketed AND NOT {blocks} AS _is_group
+                        FROM (
+                            SELECT ROW_NUM, {value_col_list},
+                                   {label_norm} AS _label_norm,
+                                   {code_expr} AS _code,
+                                   {_normalized(rest_expr)} AS _rest_norm,
+                                   {code_expr} <> '' AS _bracketed,
+                                   ({non_blank_count}) = 0 AS _is_section
+                            FROM {raw}
+                            WHERE {' AND '.join(where)}
+                        ) _classified
+                        WHERE _label_norm IS NOT NULL
+                    ) _roles
                 ) _flagged
             ) _filled
-            WHERE NOT _is_section
+            WHERE {emit}
         """
 
 
@@ -592,15 +814,19 @@ def _merge_header_rows(
 def _normalized(expr: str) -> str:
     """SQL expression implementing rule 5, applied to labels only — never values.
 
-    Collapse every run of whitespace to a single space, trim, strip a trailing
-    '[n]' footnote marker, trim again, and yield NULL when nothing is left.
+    Remove zero-width characters, collapse every run of whitespace to a single
+    space, trim, strip a trailing '[n]' footnote marker, trim again, and yield
+    NULL when nothing is left.
     Collapsing first is what makes 'With Prior 3-Day  Hospital Stay' joinable
     downstream, and it also lets the plain TRIM below strip leading tabs and
     newlines that DuckDB's TRIM would otherwise leave in place.
     """
-    collapsed = (
+    visible = (
         f"REGEXP_REPLACE(CAST({expr} AS VARCHAR), "
-        f"{sql_string_literal(_WHITESPACE_RE)}, ' ', 'g')"
+        f"{sql_string_literal(_ZERO_WIDTH_RE)}, '', 'g')"
+    )
+    collapsed = (
+        f"REGEXP_REPLACE({visible}, {sql_string_literal(_WHITESPACE_RE)}, ' ', 'g')"
     )
     return (
         f"NULLIF(TRIM(REGEXP_REPLACE(TRIM({collapsed}), "
@@ -616,9 +842,24 @@ def _normalize_label(value) -> Optional[str]:
     """
     if value is None:
         return None
-    text = _PY_WHITESPACE_RE.sub(" ", str(value)).strip()
+    text = _PY_ZERO_WIDTH_RE.sub("", str(value))
+    text = _PY_WHITESPACE_RE.sub(" ", text).strip()
     text = _PY_FOOTNOTE_SUFFIX_RE.sub("", text).strip()
     return text or None
+
+
+def _split_column_code(label: str) -> Tuple[str, Optional[str]]:
+    """('Final Risk Ratio (Capped) [I]') -> ('Final Risk Ratio (Capped)', 'I')."""
+    match = _PY_COLUMN_CODE_RE.match(label)
+    return (match.group(1), match.group(2)) if match else (label, None)
+
+
+def _header_label(value) -> Optional[str]:
+    """A normalized header cell, with Excel's 'Column<n>' placeholder as blank."""
+    label = _normalize_label(value)
+    if label is not None and _PY_PLACEHOLDER_HEADER_RE.fullmatch(label):
+        return None
+    return label
 
 
 def _sql_string_list(values: Sequence[str]) -> str:

@@ -55,6 +55,7 @@ def run(config=None) -> None:
     from mssp_pipeline.processing.processors.bnmrk_processor import BNMRKProcessor
     from mssp_pipeline.processing.processors.aexpu_processor import AEXPUProcessor
     from mssp_pipeline.processing.processors.qexpu_processor import QEXPUProcessor
+    from mssp_pipeline.processing.processors.stlmt_processor import STLMTProcessor
 
     from mssp_pipeline.processing.exceptions import ProcessingStartupError
 
@@ -76,6 +77,7 @@ def run(config=None) -> None:
         BNMRKProcessor(session, exporter, config).run()
         AEXPUProcessor(session, exporter, config).run()
         QEXPUProcessor(session, exporter, config).run()
+        STLMTProcessor(session, exporter, config).run()
     finally:
         session.close()
         _cleanup_temp_location(config)

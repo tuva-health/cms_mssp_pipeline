@@ -452,7 +452,8 @@ def test_sheet_without_any_notes(test_session, tmp_path):
 
 
 def test_file_without_matching_sheet_is_skipped(test_session, tmp_path):
-    """BNMRK 'Table 6' is absent from some deliveries — skip that file silently."""
+    """BNMRK 'Table 6' is absent from some deliveries — an optional sheet's
+    absence skips that file silently."""
     with_t6 = make_xlsx(
         tmp_path,
         {"Table 1 - Benchmark": BASIC_SHEET,
@@ -471,7 +472,7 @@ def test_file_without_matching_sheet_is_skipped(test_session, tmp_path):
     conn = run_processor(
         test_session,
         [SheetDef(table_name="SHEET_TABLE", sheet_pattern="Table 1 - %"),
-         SheetDef(table_name="ACPT_TABLE", sheet_pattern="Table 6 - %")],
+         SheetDef(table_name="ACPT_TABLE", sheet_pattern="Table 6 - %", optional=True)],
         [with_t6, without_t6],
     )
 
@@ -487,14 +488,16 @@ def test_file_without_matching_sheet_is_skipped(test_session, tmp_path):
 
 
 def test_batch_with_no_matching_sheet_yields_an_empty_table(test_session, tmp_path):
-    """A batch where no file has the sheet contributes 0 rows — it is not an error.
+    """A batch where no file has an optional sheet contributes 0 rows — it is not an error.
 
     run() calls _build_query() once per batch, so "no matching sheet" has to be a
     per-batch non-event: a whole batch can legitimately consist of Table-6-less
     deliveries.
     """
     path = make_xlsx(tmp_path, {"Table 1 - Benchmark": BASIC_SHEET})
-    conn = run_processor(test_session, defs_for(pattern="Table 9 - %"), [path])
+    conn = run_processor(
+        test_session, defs_for(pattern="Table 9 - %", optional=True), [path]
+    )
 
     assert conn.execute("SELECT COUNT(*) FROM raw_data.sheet_table").fetchone()[0] == 0
     assert [r[0] for r in conn.execute("DESCRIBE raw_data.sheet_table").fetchall()] == [
@@ -530,7 +533,7 @@ def test_sheetless_file_in_a_later_batch_does_not_fail_the_table(test_session, t
 
     conn = run_processor(
         test_session,
-        defs_for(pattern="Table 6 - %", table="ACPT_TABLE"),
+        defs_for(pattern="Table 6 - %", table="ACPT_TABLE", optional=True),
         [with_t6, without_t6],
         config=one_per_batch,
     )
@@ -1232,3 +1235,399 @@ def test_sheet_names_are_read_once_per_workbook(test_session, tmp_path):
         assert conn.execute(
             f"SELECT DISTINCT row_label FROM raw_data.t{n}"
         ).fetchall() == [(f"Row {n}",)]
+
+
+# ---------------------------------------------------------------------------
+# Sheet discovery sees every sheet (TUVA-167)
+# ---------------------------------------------------------------------------
+
+# A cover sheet whose content starts below row 1, as a real CMS cover does.
+# Read together, read_sheets() skips that many leading rows on every later
+# sheet, and a sheet no taller than that vanishes from the combined result.
+_LOW_COVER = [[None]] * 8 + [["Report cover"], ["Prepared for a synthetic ACO"]]
+
+_SHORT_SHEET = [
+    ["Table 9", None, None],
+    ["Risk Calculation", "BY3", "PY"],
+    ["ESRD", "1.1", "1.2"],
+]
+
+
+def test_a_short_sheet_behind_a_low_cover_is_still_discovered(test_session, tmp_path):
+    """Regression: discovery used one combined read_sheets() over the whole
+    workbook. Its sheets differ in shape, and the short one dropped out of the
+    combined read, so its table loaded 0 rows with nothing worse than a 'No
+    sheet matching' line. Every sheet must be found, whatever its shape."""
+    path = make_xlsx(
+        tmp_path,
+        {
+            "Cover": _LOW_COVER,
+            "Table 1 - Benchmark": BASIC_SHEET,
+            "Table 9 - Risk": _SHORT_SHEET,
+        },
+    )
+    conn = run_processor(
+        test_session,
+        [SheetDef(table_name="SHEET_TABLE", sheet_pattern="Table 1 - %"),
+         SheetDef(table_name="RISK_TABLE", sheet_pattern="Table 9 - %")],
+        [path],
+    )
+
+    assert conn.execute(
+        "SELECT row_label, column_label, value_text FROM raw_data.risk_table ORDER BY 2"
+    ).fetchall() == [("ESRD", "BY3", "1.1"), ("ESRD", "PY", "1.2")]
+    assert conn.execute("SELECT COUNT(*) FROM raw_data.sheet_table").fetchone()[0] > 0
+
+
+def test_a_missing_required_sheet_fails_the_run(test_session, tmp_path):
+    """A sheet every delivery carries is required: its absence is an error that
+    names the sheet and the file, never a silent zero-row table."""
+    path = make_xlsx(tmp_path, {"Table 1 - Benchmark": BASIC_SHEET})
+    with pytest.raises(RuntimeError, match="Table 9 - %") as excinfo:
+        run_processor(test_session, defs_for(pattern="Table 9 - %"), [path])
+    assert "report.xlsx" in str(excinfo.value)
+    assert "required" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# Real settlement-workbook header shapes (TUVA-167)
+# ---------------------------------------------------------------------------
+
+
+def test_a_sheet_with_one_value_column_finds_its_header(test_session, tmp_path):
+    """Settlement Table 3 has one value column, so its header row has one
+    labelled cell beyond column A, and a blank column A. Its SheetDef says so."""
+    sheet = [
+        ["Table 3: Shared Savings/Losses Calculation", None],
+        ["Table of Contents", None],
+        [None, None],
+        [None, "Performance Year"],
+        ["Total Savings/Losses Calculation", None],
+        ["[A] Assigned Beneficiaries", "1000"],
+    ]
+    path = make_xlsx(tmp_path, {"Table 3 - Shared Savings Losses": sheet})
+    conn = run_processor(
+        test_session, defs_for(pattern="Table 3 - %", min_header_cells=1), [path]
+    )
+
+    assert conn.execute(
+        "SELECT section_code, column_label, value_text FROM raw_data.sheet_table"
+    ).fetchall() == [("A", "Performance Year", "1000")]
+
+
+def test_zero_width_spaces_are_removed_from_labels(test_session, tmp_path):
+    """CMS header and row labels can carry U+200B next to real whitespace."""
+    sheet = [
+        ["Table 1", None, None],
+        ["Calculation", "Risk Score\u00a0\u200b\nWeights", "BY\u200b3"],
+        ["ESRD\u200b", "1", "2"],
+    ]
+    path = make_xlsx(tmp_path, {"Table 1 - Benchmark": sheet})
+    conn = run_processor(test_session, defs_for(), [path])
+
+    assert conn.execute(
+        "SELECT row_label, column_label FROM raw_data.sheet_table ORDER BY row_num, column_label"
+    ).fetchall() == [("ESRD", "BY3"), ("ESRD", "Risk Score Weights")]
+
+
+def test_an_excel_table_placeholder_header_is_a_blank_header(test_session, tmp_path):
+    """An Excel table (ListObject) names a blank header cell 'Column1'. That
+    spacer column is excluded, like any column with a blank header."""
+    sheet = [
+        ["Table 1", None, None, None],
+        ["Calculate Historical Benchmark", "BY3", "Column1", "Benchmark"],
+        ["[I] Historical Benchmark ($)", "-", None, "13000"],
+    ]
+    path = make_xlsx(tmp_path, {"Table 1 - Benchmark": sheet})
+    conn = run_processor(test_session, defs_for(), [path])
+
+    assert conn.execute(
+        "SELECT DISTINCT column_label FROM raw_data.sheet_table ORDER BY 1"
+    ).fetchall() == [("BY3",), ("Benchmark",)]
+
+
+# ---------------------------------------------------------------------------
+# Layout columns: the explicit raw shape the settlement workbook needs (TUVA-167)
+#
+# A processor with LAYOUT_COLUMNS = True (STLMTProcessor) adds three grammar
+# columns: BLOCK_LABEL, ROW_KIND and COLUMN_CODE. The others are unchanged.
+# ---------------------------------------------------------------------------
+
+
+class _LayoutProcessor(_Processor):
+    LAYOUT_COLUMNS = True
+
+
+def run_layout(session, sheet_defs, paths):
+    return run_processor(session, sheet_defs, paths, processor_cls=_LayoutProcessor)
+
+
+def _layout_cells(conn, where="TRUE"):
+    return conn.execute(
+        "SELECT block_label, section_code, row_label, row_kind, column_code, "
+        f"column_label, value_text FROM raw_data.sheet_table WHERE {where} "
+        "ORDER BY row_num, column_label"
+    ).fetchall()
+
+
+def test_layout_columns_are_added_to_the_schema(test_session, tmp_path):
+    path = make_xlsx(tmp_path, {"Table 1 - Benchmark": BASIC_SHEET})
+    conn = run_layout(test_session, defs_for(), [path])
+
+    assert [r[0] for r in conn.execute("DESCRIBE raw_data.sheet_table").fetchall()] == [
+        "row_num", "block_label", "group_label", "section_code", "section_label",
+        "row_label", "row_kind", "column_group_label", "column_code",
+        "column_label", "value_text",
+        "file_path", "directory_name", "file_name", "file_date",
+    ]
+
+
+def test_layout_empty_batch_has_the_layout_schema(test_session, tmp_path):
+    path = make_xlsx(tmp_path, {"Table 1 - Benchmark": BASIC_SHEET})
+    conn = run_layout(test_session, defs_for(pattern="Table 9 - %", optional=True), [path])
+
+    columns = [r[0] for r in conn.execute("DESCRIBE raw_data.sheet_table").fetchall()]
+    assert {"block_label", "row_kind", "column_code"} <= set(columns)
+
+
+# Settlement Table A1: the letters label columns, not rows.
+_COLUMN_CODED_SHEET = [
+    ["Table A1: Risk Ratios", None, None, None],
+    ["Table of Contents", None, None, None],
+    [None, None, None, None],
+    ["Medicare Enrollment Type", "Risk Score Weights\u00a0\u200b\n[A]",
+     "BY3 CMS-HCC Risk Score\n[B]", "Final Risk Ratio (Capped)\n[I]"],
+    ["ESRD", "0.1", "1.2", "1.01"],
+    ["Weighted Average ", "\u2013", "\u2013", "1.0"],
+]
+
+
+def test_a_column_code_is_split_off_its_header_label(test_session, tmp_path):
+    path = make_xlsx(tmp_path, {"Table A1 - Risk": _COLUMN_CODED_SHEET})
+    conn = run_layout(test_session, defs_for(pattern="Table A1 - %"), [path])
+
+    assert _layout_cells(conn, "row_label = 'ESRD'") == [
+        (None, None, "ESRD", "DETAIL", "B", "BY3 CMS-HCC Risk Score", "1.2"),
+        (None, None, "ESRD", "DETAIL", "I", "Final Risk Ratio (Capped)", "1.01"),
+        (None, None, "ESRD", "DETAIL", "A", "Risk Score Weights", "0.1"),
+    ]
+    # The weighted-average row is data, its blanks the en dash verbatim.
+    assert ("Weighted Average", "\u2013") in {
+        (row, value) for _, _, row, _, _, _, value in _layout_cells(conn)
+    }
+
+
+def test_without_layout_columns_a_coded_header_keeps_its_code(test_session, tmp_path):
+    path = make_xlsx(tmp_path, {"Table A1 - Risk": _COLUMN_CODED_SHEET})
+    conn = run_processor(test_session, defs_for(pattern="Table A1 - %"), [path])
+
+    assert "Risk Score Weights [A]" in {
+        r[0] for r in conn.execute("SELECT column_label FROM raw_data.sheet_table").fetchall()
+    }
+
+
+# Settlement Table 2: [A] and [B] head per-type rows and carry sub-header text
+# in their own cells; [A] closes with a total row repeating its label.
+_SUBHEADED_SHEET = [
+    ["Table 2: Updated Benchmark Determination", None, None, None],
+    ["Table of Contents", None, None, None],
+    [None, None, None, None],
+    [None, "Benchmark Period", None, "Performance Year"],
+    ["Updated Benchmark Determination", None, None, None],
+    ["[A] Historical Benchmark Expenditures After Applying Adjustment",
+     "3-Year Average Benchmark", None, None],
+    ["ESRD", "90000", None, "\u2013"],
+    ["Historical Benchmark Expenditures After Applying Adjustment", "12000", None, "\u2013"],
+    ["[B] ACO CMS-HCC Risk Score ", "BY3", None, None],
+    ["ESRD", "1.1", None, "1.2"],
+    ["[C] ACO CMS-HCC Risk Ratio (Capped)", None, None, None],
+    ["ESRD", "\u2013", None, "1.01"],
+    ["[I] Updated Benchmark ($) ", "\u2013", None, "13000"],
+]
+
+
+def test_row_kind_tells_code_detail_and_total_rows_apart(test_session, tmp_path):
+    path = make_xlsx(tmp_path, {"Table 2 - Updated Benchmark": _SUBHEADED_SHEET})
+    conn = run_layout(
+        test_session,
+        defs_for(pattern="Table 2 - %", heading_cells_are_labels=True),
+        [path],
+    )
+
+    assert conn.execute(
+        "SELECT section_code, row_label, row_kind, column_label, value_text "
+        "FROM raw_data.sheet_table ORDER BY row_num, column_label"
+    ).fetchall() == [
+        ("A", "ESRD", "DETAIL", "Benchmark Period", "90000"),
+        ("A", "ESRD", "DETAIL", "Performance Year", "\u2013"),
+        ("A", "Historical Benchmark Expenditures After Applying Adjustment", "TOTAL",
+         "Benchmark Period", "12000"),
+        ("A", "Historical Benchmark Expenditures After Applying Adjustment", "TOTAL",
+         "Performance Year", "\u2013"),
+        ("B", "ESRD", "DETAIL", "Benchmark Period", "1.1"),
+        ("B", "ESRD", "DETAIL", "Performance Year", "1.2"),
+        ("C", "ESRD", "DETAIL", "Benchmark Period", "\u2013"),
+        ("C", "ESRD", "DETAIL", "Performance Year", "1.01"),
+        ("I", "Updated Benchmark ($)", "CODE", "Benchmark Period", "\u2013"),
+        ("I", "Updated Benchmark ($)", "CODE", "Performance Year", "13000"),
+    ]
+
+
+def test_a_heading_row_keeps_real_values_unless_its_cells_are_labels(test_session, tmp_path):
+    """Table 1 [A2] carries totals on the lettered row and per-type values
+    beneath it. Only a SheetDef that says so treats heading cells as labels."""
+    sheet = [
+        ["Table 1", None, None],
+        ["Calculate Historical Benchmark", "BY1", "BY3"],
+        ["[A2] Person Years", "900", "950"],
+        ["ESRD", "\u2013", "20"],
+    ]
+    path = make_xlsx(tmp_path, {"Table 1 - Benchmark": sheet})
+    conn = run_layout(test_session, defs_for(), [path])
+
+    assert conn.execute(
+        "SELECT row_label, row_kind, column_label, value_text FROM raw_data.sheet_table "
+        "ORDER BY row_num, column_label"
+    ).fetchall() == [
+        ("Person Years", "CODE", "BY1", "900"),
+        ("Person Years", "CODE", "BY3", "950"),
+        ("ESRD", "DETAIL", "BY1", "\u2013"),
+        ("ESRD", "DETAIL", "BY3", "20"),
+    ]
+
+
+def test_a_blank_lettered_row_is_kept_when_it_heads_nothing(test_session, tmp_path):
+    """Settlement Table 1B can leave a lettered row entirely blank. It is still
+    a reported figure, so its cells load (NULL); a blank lettered row that
+    heads per-type rows is only a heading."""
+    sheet = [
+        ["Table 1B", None, None],
+        ["Prior Savings Adjustment Calculation", "PY Corresponding to BY1", "Prior Savings Adjustment"],
+        ["Apply Proration Factor", None, None],
+        ["[E] Numerator of Proration Factor", None, None],
+        ["[F] Denominator of Proration Factor", None, None],
+        ["[G] Proration Factor", "\u2013", "\u2013"],
+        ["[K] Adjustment by Enrollment Type ($)", None, None],
+        ["ESRD", "\u2013", "5"],
+    ]
+    path = make_xlsx(tmp_path, {"Table 1B - Prior Savings Adj": sheet})
+    conn = run_layout(test_session, defs_for(pattern="Table 1B - %"), [path])
+
+    assert conn.execute(
+        "SELECT section_code, row_kind, COUNT(*), COUNT(value_text) FROM raw_data.sheet_table "
+        "GROUP BY ALL ORDER BY 1"
+    ).fetchall() == [
+        ("E", "CODE", 2, 0),
+        ("F", "CODE", 2, 0),
+        ("G", "CODE", 2, 2),
+        ("K", "DETAIL", 2, 2),
+    ]
+
+
+# Settlement Table A2: two blocks, each a title, a header row and type rows.
+_BLOCK_SHEET = [
+    ["Table A2: Risk Score Renormalization", None, None],
+    ["Table of Contents ", None, None],
+    [None, None, None],
+    ["Mean CMS-HCC Risk Scores Used to Renormalize CMS-HCC Risk Scores", None, None],
+    ["Medicare Enrollment Type", "BY3", "PY"],
+    ["ESRD", "1.05", "1.06"],
+    [None, None, None],
+    ["Mean Demographic Risk Scores Used to Renormalize Demographic Risk Scores", None, None],
+    ["Medicare Enrollment Type", "BY3", "PY"],
+    ["ESRD", "1.01", "1.02"],
+]
+
+
+def test_blocks_are_labelled_and_their_repeated_headers_dropped(test_session, tmp_path):
+    path = make_xlsx(tmp_path, {"Table A2 - Renormalization": _BLOCK_SHEET})
+    conn = run_layout(test_session, defs_for(pattern="Table A2 - %", blocks=True), [path])
+
+    assert conn.execute(
+        "SELECT block_label, group_label, row_label, row_kind, column_label, value_text "
+        "FROM raw_data.sheet_table ORDER BY row_num, column_label"
+    ).fetchall() == [
+        ("Mean CMS-HCC Risk Scores Used to Renormalize CMS-HCC Risk Scores", None,
+         "ESRD", "DETAIL", "BY3", "1.05"),
+        ("Mean CMS-HCC Risk Scores Used to Renormalize CMS-HCC Risk Scores", None,
+         "ESRD", "DETAIL", "PY", "1.06"),
+        ("Mean Demographic Risk Scores Used to Renormalize Demographic Risk Scores", None,
+         "ESRD", "DETAIL", "BY3", "1.01"),
+        ("Mean Demographic Risk Scores Used to Renormalize Demographic Risk Scores", None,
+         "ESRD", "DETAIL", "PY", "1.02"),
+    ]
+
+
+# Settlement Table A4: a lookup grid whose column A is data.
+_GRID_SHEET = [
+    ["Table A4: Minimum Savings Rate (MSR)", None, None, None],
+    ["Table of Contents", None, None, None],
+    ["Overview", None, None, None],
+    ["For all one-sided ACOs, the MSR varies by assigned beneficiaries.", None, None, None],
+    [None, None, None, None],
+    ["Number of Assigned Beneficiaries Range: \nLow",
+     "Number of Assigned Beneficiaries Range: \nHigh",
+     "MSR Range: \nLow", "MSR Range:\nHigh"],
+    ["5000", "5999", "0.039", "0.036"],
+    ["60000", "and above", "0.02", "0.02"],
+]
+
+
+def test_a_grid_keeps_column_a_as_data(test_session, tmp_path):
+    path = make_xlsx(tmp_path, {"Table A4 - MSR": _GRID_SHEET})
+    conn = run_layout(
+        test_session, defs_for(pattern="Table A4 - %", label_column_is_data=True), [path]
+    )
+
+    assert conn.execute(
+        "SELECT row_label, row_kind, column_label, value_text FROM raw_data.sheet_table "
+        "WHERE row_label = '60000' ORDER BY column_label"
+    ).fetchall() == [
+        ("60000", "DETAIL", "MSR Range: High", "0.02"),
+        ("60000", "DETAIL", "MSR Range: Low", "0.02"),
+        ("60000", "DETAIL", "Number of Assigned Beneficiaries Range: High", "and above"),
+        ("60000", "DETAIL", "Number of Assigned Beneficiaries Range: Low", "60000"),
+    ]
+    assert conn.execute(
+        "SELECT COUNT(DISTINCT row_label), COUNT(*) FROM raw_data.sheet_table"
+    ).fetchone() == (2, 8)
+
+
+def test_a_repeated_header_with_a_spacer_column_is_still_dropped(test_session, tmp_path):
+    """Excel names a blank table header 'Column1'; the repeat check must see
+    the same raw header the sheet repeats, spacer and all."""
+    sheet = [
+        ["Table A2", None, None, None],
+        ["Block one", None, None, None],
+        ["Medicare Enrollment Type", "BY3", "Column1", "PY"],
+        ["ESRD", "1.05", None, "1.06"],
+        ["Block two", None, None, None],
+        ["Medicare Enrollment Type", "BY3", "Column1", "PY"],
+        ["ESRD", "1.01", None, "1.02"],
+    ]
+    path = make_xlsx(tmp_path, {"Table A2 - Renormalization": sheet})
+    conn = run_layout(test_session, defs_for(pattern="Table A2 - %", blocks=True), [path])
+
+    assert conn.execute(
+        "SELECT block_label, row_label, COUNT(*) FROM raw_data.sheet_table "
+        "GROUP BY ALL ORDER BY MIN(row_num)"
+    ).fetchall() == [("Block one", "ESRD", 2), ("Block two", "ESRD", 2)]
+
+
+def test_a_block_sheet_without_a_title_above_its_header_fails(test_session, tmp_path):
+    sheet = [["Table A2", None, None], [None, None, None],
+             ["Medicare Enrollment Type", "BY3", "PY"], ["ESRD", "1", "2"]]
+    path = make_xlsx(tmp_path, {"Table A2 - Renormalization": sheet})
+    with pytest.raises(RuntimeError, match="blocks"):
+        run_layout(test_session, defs_for(pattern="Table A2 - %", blocks=True), [path])
+
+
+@pytest.mark.parametrize(
+    "option", ["blocks", "label_column_is_data", "heading_cells_are_labels"]
+)
+def test_a_layout_option_needs_a_layout_processor(test_session, tmp_path, option):
+    """The options only make sense with the layout columns; set on a plain
+    processor they fail loudly rather than half-apply."""
+    path = make_xlsx(tmp_path, {"Table 1 - Benchmark": BASIC_SHEET})
+    with pytest.raises(RuntimeError, match="LAYOUT_COLUMNS"):
+        run_processor(test_session, defs_for(**{option: True}), [path])

@@ -7,6 +7,91 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Breaking for STLMT readers:** the settlement workbook loads in its real
+  layout (TUVA-167), checked against a real PY2025 workbook. The STLMT tables
+  gain three grammar columns, `BLOCK_LABEL`, `ROW_KIND` (`CODE`, `DETAIL`,
+  `TOTAL`) and `COLUMN_CODE`, and the workbook contract moves to 1.3.0 with
+  a new `stlmt_cell_grain` schema for them. Table 3 loads, with all of
+  `[A]`-`[UU]` (it failed with "No header row found"). Table A1's letters,
+  which label its columns, are in `COLUMN_CODE` with clean labels, one row
+  per enrollment type plus `Weighted Average`. Table 2 drops its sub-header
+  text and marks its `[A]` total row `TOTAL`. Table A2's two blocks are
+  labelled and its repeated header is gone. Table A4 is a grid that keeps its
+  column A. Excel's `Column1` spacer columns and U+200B in labels are gone,
+  and Table 1B's blank lettered rows load with NULL cells. cms_mssp_connector's
+  settlement models need rebuilding on this shape (TUVA-168). The STLMT
+  tables have not been released, so there is no upgrade step, and the
+  contract takes a minor bump rather than a major one: no released relation
+  changes shape.
+
+- The final settlement (financial reconciliation) workbook,
+  `P.{ACO}.ACO.STLMT.Y{PY}.D…T….xlsx`, now loads (TUVA-158). Its `Table *`
+  sheets and `Parameters` tab become thirteen new cell-grain tables:
+  `STLMT_TABLE_1`, `_1A`, `_1B`, `_1C`, `_2`, `_3`, `_A1` through `_A6`, and
+  `STLMT_PARAMETERS`. `Cover`, `TOC` and `Glossary` are skipped. Every row
+  carries `PERFORMANCE_YEAR`, the settlement `SUBMISSION_ID` and
+  `IS_EMBARGOED`; `PERIOD` is `Y<performance year>`. The embargoed and
+  unembargoed copies both load, and a reader prefers `IS_EMBARGOED = FALSE`.
+  `STLMT_TABLE_A6` (ACPT) is optional. The workbook contract moves to 1.2.0
+  and declares thirty-three relations. The processor shares the
+  `MSSP_PROCESS_BATCH_SIZE_EXPU` knob. New tables need no upgrade step.
+
+- Workbook tables carry `IS_EMBARGOED` (BOOLEAN), and the workbook contract
+  moves to 1.1.0 (TUVA-154). It is set only on rows from a final settlement
+  (STLMT) bundle: `TRUE` for the embargoed delivery (`T0000000`), `FALSE` for
+  the unembargoed one (`T1111111`). Any other stamp falls back to the
+  Embargoed/Unembargoed FinRec notice file in the bundle, else NULL. Both
+  copies load as separate submissions. Every other row is NULL.
+
+### Changed
+
+- Tests only: the synthetic e2e delivery now matches cms_mssp_connector's
+  integration seeds (TUVA-165). Its BNMRK, AEXPU and QEXPU workbooks are
+  rendered from a copy of the connector's workbook seeds
+  (`tests/e2e/fixtures/workbooks/`) for the connector's ACO `A0000`, and a
+  new test checks that the processors parse them back into exactly those
+  rows, so the connector's `scripts/dbt-pipeline-e2e` can build its
+  benchmark facts on pipeline output. The STLMT test workbook's values
+  were made to agree across Tables 2, 3 and A1, with Table A1's BY3 scores
+  taken from the BNMRK fixture. TUVA-167 then rebuilt that workbook in the
+  real CMS layout, keeping those values (see Added). No output table changes.
+
+- **Breaking:** files in a final settlement (STLMT) bundle get their own
+  `SUBMISSION_ID`: `STLMT.` plus the bundle directory's stamp, for example
+  `STLMT.D259999.T1111111` (TUVA-154). Benchmark and quarterly
+  `SUBMISSION_ID`s are unchanged. This covers every workbook the BNMRK,
+  AEXPU and QEXPU processors read; no other processor carries a
+  `SUBMISSION_ID`. To upgrade, run the BNMRK, AEXPU and QEXPU tables once
+  with full refresh (or drop them). An incremental run does not reload files it has already
+  loaded, so earlier settlement rows keep the old `SUBMISSION_ID`, and the
+  DuckDB and Parquet exporters cannot append the new column to an existing
+  table. Snowflake appends by column name and would silently drop it.
+
+### Fixed
+
+- Sheet discovery could silently miss a sheet (TUVA-167). It read the whole
+  workbook in one `read_sheets()` call, which skips as many leading rows on
+  every later sheet as the first sheet's content starts below row 1. A sheet
+  no taller than that vanished, and its table loaded 0 rows with only a "No
+  sheet matching" line. On a real settlement workbook that was Tables 1C, A1
+  and A5. Discovery now uses `analyze_sheets()`, which reads no cell data.
+  Checked on 28 real BNMRK, QEXPU and AEXPU workbooks: only the `TOC` sheet,
+  which no table reads, was ever missed, so no loaded table lost data, and
+  their output is unchanged.
+
+- A missing sheet is an error unless it is optional (TUVA-167). Only
+  `BNMRK_TABLE_6`, `AEXPU_TABLE_1A`, `AEXPU_TABLE_4A` and `STLMT_TABLE_A6`
+  may be absent, as before; a workbook missing any other sheet now fails
+  that table, and so the run, instead of loading 0 rows silently.
+
+- A settlement AEXPU whose stamp matched a benchmark delivery for the same
+  performance year joined that benchmark submission (TUVA-154). The
+  submission then held four workbooks, and cms_mssp_connector labelled them
+  BY0–BY3, failing its `accepted_values` test on `BENCHMARK_YEAR_LABEL`. The
+  benchmark submission now holds only its three benchmark years.
+
 ## [0.4.0] - 2026-11-16
 
 This release is required for cms_mssp_connector v1.0.0, which runs

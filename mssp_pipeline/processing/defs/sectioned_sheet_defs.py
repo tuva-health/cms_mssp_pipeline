@@ -19,7 +19,33 @@ class SheetDef:
     table_name: str                     # e.g. "BNMRK_TABLE_1"
     sheet_pattern: str                  # SQL LIKE pattern, e.g. "Table 1 - Historical%"
     header_row_hint: int | None = None  # 1-based override when auto-detection fails
+    # Labelled cells beyond column A that make a row the header. 2 skips the
+    # single-cell decorative row some sheets carry above their header; a sheet
+    # with only one value column (settlement Table 3) needs 1.
+    min_header_cells: int = 2
     include_notes: bool = False         # keep footnote/notes rows instead of dropping them
+
+    # A sheet some conforming deliveries legitimately lack (BNMRK 'Table 6 -
+    # ACPT', the AEXPU COVID variants, STLMT 'Table A6 - ACPT'). Such a file
+    # contributes 0 rows. Every other sheet is required: a workbook without it
+    # fails the table, and so the run, rather than loading 0 rows silently.
+    optional: bool = False
+
+    # Layouts of the settlement (STLMT) workbook. They need a processor with
+    # LAYOUT_COLUMNS (see SectionedSheetProcessor); on any other the sheet fails.
+    #
+    # heading_cells_are_labels: a lettered row heading detail rows carries
+    #   sub-header text in its cells ('3-Year Average Benchmark', 'BY3'), not
+    #   values, so it emits nothing (settlement Table 2).
+    # blocks: the sheet is a stack of blocks, each a title row, a header row and
+    #   data rows. Titles fill BLOCK_LABEL, and a header row repeated by a later
+    #   block is dropped (settlement Table A2).
+    # label_column_is_data: column A holds data, not row labels. It is emitted as
+    #   a value column under its header label, and also keys the row as
+    #   ROW_LABEL (settlement Table A4, a lookup grid).
+    heading_cells_are_labels: bool = False
+    blocks: bool = False
+    label_column_is_data: bool = False
 
     # Key/value sheets (the "Parameters" tab) carry no column-header row at all:
     # column A is the key, column B the value. Setting this skips header detection

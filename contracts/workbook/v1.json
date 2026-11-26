@@ -1,12 +1,12 @@
 {
   "contract": "cms-mssp-workbook-export",
-  "version": "1.0.0",
+  "version": "1.3.0",
   "grain": "cell",
   "title": "CMS MSSP workbook export contract, v1",
-  "description": "Canonical, machine-readable API for the BNMRK / AEXPU / QEXPU sectioned-workbook exports. Every data sheet in these three ACO benchmark workbooks is unpivoted into one long/tidy, cell-grain relation: one row per (sheet row x sheet column) cell, carrying the section/row/column hierarchy plus path-derived delivery metadata. This contract publishes the exact set of twenty relations, the shared cell-grain schema each conforms to, and the optional-sheet behavior, so consumers can check benchmark outputs independently. Real agreement rows remain client-owned; this contract exposes shape and versioning only.",
+  "description": "Canonical, machine-readable API for the BNMRK / AEXPU / QEXPU / STLMT sectioned-workbook exports. Every data sheet in these four ACO benchmark and settlement workbooks is unpivoted into one long/tidy, cell-grain relation: one row per (sheet row x sheet column) cell, carrying the section/row/column hierarchy plus path-derived delivery metadata. This contract publishes the exact set of thirty-three relations, the cell-grain schemas they conform to, and the optional-sheet behavior, so consumers can check benchmark outputs independently. Real agreement rows remain client-owned; this contract exposes shape and versioning only.",
   "schemas": {
     "cell_grain": {
-      "description": "The long/tidy schema every BNMRK/AEXPU/QEXPU relation conforms to. The first eight columns are the sheet grammar (section/row/column hierarchy and the verbatim cell value); the remaining nine are path-derived delivery metadata appended to every row. Column names are the exported (lowercase, cross-warehouse-normalised) identifiers. All cell values are emitted VARCHAR verbatim; typing and casting happen downstream in dbt.",
+      "description": "The long/tidy schema every BNMRK/AEXPU/QEXPU relation conforms to; STLMT relations use stlmt_cell_grain, which extends it. The first eight columns are the sheet grammar (section/row/column hierarchy and the verbatim cell value); the remaining ten are path-derived delivery metadata appended to every row. Column names are the exported (lowercase, cross-warehouse-normalised) identifiers. All cell values are emitted VARCHAR verbatim; typing and casting happen downstream in dbt.",
       "columns": [
         {"name": "row_num", "type": "BIGINT", "role": "grammar", "nullable": false, "description": "1-based position of the source row as the sheet reader returned it."},
         {"name": "group_label", "type": "VARCHAR", "role": "grammar", "nullable": true, "description": "Nearest unbracketed section header above the row (the merged primary group)."},
@@ -15,16 +15,43 @@
         {"name": "row_label", "type": "VARCHAR", "role": "grammar", "nullable": true, "description": "Normalised label from column A of the data row."},
         {"name": "column_group_label", "type": "VARCHAR", "role": "grammar", "nullable": true, "description": "Merged primary header above a two-level column header; NULL for single-level headers and always NULL on key/value (Parameters) sheets."},
         {"name": "column_label", "type": "VARCHAR", "role": "grammar", "nullable": true, "description": "Header label of the value column this cell came from."},
-        {"name": "value_text", "type": "VARCHAR", "role": "grammar", "nullable": true, "description": "The cell value, VARCHAR verbatim ('-' stays '-')."},
+        {"name": "value_text", "type": "VARCHAR", "role": "grammar", "nullable": true, "description": "The cell value, VARCHAR verbatim: a blank written as '-' or as the en dash U+2013 stays as written."},
         {"name": "file_path", "type": "VARCHAR", "role": "metadata", "nullable": false, "description": "Slash-normalised source workbook path; the incremental-dedup key."},
         {"name": "directory_name", "type": "VARCHAR", "role": "metadata", "nullable": false, "description": "Directory portion of file_path."},
         {"name": "file_name", "type": "VARCHAR", "role": "metadata", "nullable": false, "description": "Base filename of the source workbook."},
         {"name": "file_date", "type": "DATE", "role": "metadata", "nullable": true, "description": "Delivery date derived from the path/filename; NULL when the stamp is a placeholder or otherwise unparseable."},
         {"name": "aco_id", "type": "VARCHAR", "role": "metadata", "nullable": true, "description": "ACO identifier the run is scoped to."},
         {"name": "performance_year", "type": "VARCHAR", "role": "metadata", "nullable": true, "description": "Four-digit performance year from the directory layout; NULL when absent."},
-        {"name": "benchmark_year", "type": "VARCHAR", "role": "metadata", "nullable": true, "description": "Benchmark year from the AEXPU 'Y<year>' filename token; always NULL for BNMRK and QEXPU."},
-        {"name": "submission_id", "type": "VARCHAR", "role": "metadata", "nullable": true, "description": "'D<YYMMDD>.T<NNNNNNN>' submission stamp distinguishing deliveries; NULL when absent."},
-        {"name": "period", "type": "VARCHAR", "role": "metadata", "nullable": true, "description": "Family-specific period token: the submission id (BNMRK), 'Y<year>' (AEXPU), or the literal quarter such as '2026Q1' (QEXPU)."}
+        {"name": "benchmark_year", "type": "VARCHAR", "role": "metadata", "nullable": true, "description": "Benchmark year from the AEXPU 'Y<year>' filename token; always NULL for BNMRK, QEXPU and STLMT."},
+        {"name": "submission_id", "type": "VARCHAR", "role": "metadata", "nullable": true, "description": "Delivery identity. Benchmark and quarterly files: the file's 'D<YYMMDD>.T<NNNNNNN>' stamp. Files in a final settlement (STLMT) bundle, and the STLMT workbook wherever it is filed: 'STLMT.' plus the bundle directory's stamp (the file's stamp when the directory has none, or when a STLMT workbook sits outside a STLMT bundle), so a settlement never joins a benchmark delivery that shares its stamp. NULL when absent."},
+        {"name": "period", "type": "VARCHAR", "role": "metadata", "nullable": true, "description": "Family-specific period token: the submission id (BNMRK), 'Y<year>' (AEXPU), the literal quarter such as '2026Q1' (QEXPU), or 'Y<performance_year>' (STLMT)."},
+        {"name": "is_embargoed", "type": "BOOLEAN", "role": "metadata", "nullable": true, "description": "Settlement (STLMT) files only: TRUE for the embargoed delivery, FALSE for the unembargoed one. Taken from the delivery's T stamp (T0000000 embargoed, T1111111 unembargoed), else from the Embargoed/Unembargoed FinRec notice file in the bundle (the one value not derived from the workbook's own path: it comes from a listing of the bundle directory, read when the workbook is first loaded). NULL on every non-settlement row, and on a settlement whose state neither source settles. Both copies can be present; prefer FALSE."}
+      ]
+    },
+    "stlmt_cell_grain": {
+      "description": "The STLMT relations' schema: cell_grain plus three layout grammar columns (block_label, row_kind, column_code) that keep the real settlement layout explicit. Values are VARCHAR verbatim: a blank is the en dash U+2013, and a large number can arrive in E-notation ('5.0E7').",
+      "columns": [
+        {"name": "row_num", "type": "BIGINT", "role": "grammar", "nullable": false, "description": "1-based position of the source row as the sheet reader returned it."},
+        {"name": "block_label", "type": "VARCHAR", "role": "grammar", "nullable": true, "description": "Title of the block the row sits in, on a sheet stacked from title/header/data blocks (STLMT Table A2: the CMS-HCC block, then the demographic block); NULL elsewhere."},
+        {"name": "group_label", "type": "VARCHAR", "role": "grammar", "nullable": true, "description": "Nearest unbracketed section header above the row (the merged primary group)."},
+        {"name": "section_code", "type": "VARCHAR", "role": "grammar", "nullable": true, "description": "Bracketed section code, e.g. 'A1' from '[A1] Person Years'; NULL for an unbracketed section."},
+        {"name": "section_label", "type": "VARCHAR", "role": "grammar", "nullable": true, "description": "Label of the section the row belongs to."},
+        {"name": "row_label", "type": "VARCHAR", "role": "grammar", "nullable": true, "description": "Normalised label from column A of the data row."},
+        {"name": "row_kind", "type": "VARCHAR", "role": "grammar", "nullable": false, "description": "What the source row is. 'CODE': the lettered row itself (its own cells are the figure, e.g. Table 3 '[A] Assigned Beneficiaries'; a lettered row left entirely blank still loads, its cells NULL). 'DETAIL': a row under a lettered or group heading (an enrollment type, a Table A1/A2 row, a Table A4 grid row, a Parameters key). 'TOTAL': an unlettered row repeating its section's label, which closes the section with its total (Table 2 [A]). A lettered row that only heads detail rows is not emitted."},
+        {"name": "column_group_label", "type": "VARCHAR", "role": "grammar", "nullable": true, "description": "Merged primary header above a two-level column header; NULL for single-level headers and always NULL on key/value (Parameters) sheets."},
+        {"name": "column_code", "type": "VARCHAR", "role": "grammar", "nullable": true, "description": "Letter closing the source header label, cut from column_label (Table A1: 'Final Risk Ratio (Capped) [I]' gives 'I'); NULL elsewhere."},
+        {"name": "column_label", "type": "VARCHAR", "role": "grammar", "nullable": true, "description": "Header label of the value column this cell came from, normalised, with any column_code removed. Table A4's column A (data, not a label) appears as its own column."},
+        {"name": "value_text", "type": "VARCHAR", "role": "grammar", "nullable": true, "description": "The cell value, VARCHAR verbatim: a blank written as '-' or as the en dash U+2013 stays as written."},
+        {"name": "file_path", "type": "VARCHAR", "role": "metadata", "nullable": false, "description": "Slash-normalised source workbook path; the incremental-dedup key."},
+        {"name": "directory_name", "type": "VARCHAR", "role": "metadata", "nullable": false, "description": "Directory portion of file_path."},
+        {"name": "file_name", "type": "VARCHAR", "role": "metadata", "nullable": false, "description": "Base filename of the source workbook."},
+        {"name": "file_date", "type": "DATE", "role": "metadata", "nullable": true, "description": "Delivery date derived from the path/filename; NULL when the stamp is a placeholder or otherwise unparseable."},
+        {"name": "aco_id", "type": "VARCHAR", "role": "metadata", "nullable": true, "description": "ACO identifier the run is scoped to."},
+        {"name": "performance_year", "type": "VARCHAR", "role": "metadata", "nullable": true, "description": "Four-digit performance year from the directory layout; NULL when absent."},
+        {"name": "benchmark_year", "type": "VARCHAR", "role": "metadata", "nullable": true, "description": "Benchmark year from the AEXPU 'Y<year>' filename token; always NULL for BNMRK, QEXPU and STLMT."},
+        {"name": "submission_id", "type": "VARCHAR", "role": "metadata", "nullable": true, "description": "Delivery identity. Benchmark and quarterly files: the file's 'D<YYMMDD>.T<NNNNNNN>' stamp. Files in a final settlement (STLMT) bundle, and the STLMT workbook wherever it is filed: 'STLMT.' plus the bundle directory's stamp (the file's stamp when the directory has none, or when a STLMT workbook sits outside a STLMT bundle), so a settlement never joins a benchmark delivery that shares its stamp. NULL when absent."},
+        {"name": "period", "type": "VARCHAR", "role": "metadata", "nullable": true, "description": "Family-specific period token: the submission id (BNMRK), 'Y<year>' (AEXPU), the literal quarter such as '2026Q1' (QEXPU), or 'Y<performance_year>' (STLMT)."},
+        {"name": "is_embargoed", "type": "BOOLEAN", "role": "metadata", "nullable": true, "description": "Settlement (STLMT) files only: TRUE for the embargoed delivery, FALSE for the unembargoed one. Taken from the delivery's T stamp (T0000000 embargoed, T1111111 unembargoed), else from the Embargoed/Unembargoed FinRec notice file in the bundle (the one value not derived from the workbook's own path: it comes from a listing of the bundle directory, read when the workbook is first loaded). NULL on every non-settlement row, and on a settlement whose state neither source settles. Both copies can be present; prefer FALSE."}
       ]
     }
   },
@@ -39,7 +66,7 @@
     "AEXPU": {
       "workbook": "Annual Expenditure & Utilization report",
       "filename_token": ".AEXPU.",
-      "cadence": "One workbook per benchmark year (BY1/BY2/BY3), delivered inside the BNMRK bundle.",
+      "cadence": "One workbook per benchmark year (BY1/BY2/BY3), delivered inside the BNMRK bundle. The final settlement (STLMT) bundle also carries one, for the performance year; its submission_id starts 'STLMT.' and it is not part of any benchmark delivery.",
       "period_meaning": "'Y<benchmark_year>'",
       "benchmark_year": "populated from the 'Y<year>' filename token"
     },
@@ -49,17 +76,26 @@
       "cadence": "One workbook per quarter.",
       "period_meaning": "literal quarter, e.g. '2026Q1'",
       "benchmark_year": "always NULL"
+    },
+    "STLMT": {
+      "workbook": "Final settlement (financial reconciliation) report",
+      "filename_token": ".STLMT.Y",
+      "cadence": "One workbook per performance year, in the final settlement bundle (around August to November of PY+1). CMS can deliver the bundle twice, embargoed and unembargoed, with the same workbook; both load as separate submissions, and a reader prefers is_embargoed = FALSE. Only files named '...STLMT.Y<year>.D<YYMMDD>.T<NNNNNNN>.xlsx' are read.",
+      "period_meaning": "'Y<performance_year>'",
+      "benchmark_year": "always NULL"
     }
   },
   "optional_sheet_behavior": {
-    "summary": "Not every delivery carries every sheet. A relation whose source sheet is absent from the deliveries in a batch contributes zero rows for that batch rather than raising; the relation and its full cell-grain schema still materialise. A relation is flagged 'optional' when its source sheet is legitimately absent from some conforming deliveries.",
-    "absent_sheet": "zero rows, schema-conformant table still produced (not an error)",
+    "summary": "Not every delivery carries every sheet. An optional relation whose source sheet is absent from the deliveries in a batch contributes zero rows for that batch rather than raising; the relation and its full cell-grain schema still materialise. A relation is flagged 'optional' when its source sheet is legitimately absent from some conforming deliveries.",
+    "absent_sheet": "optional relation: zero rows, schema-conformant table still produced (not an error)",
+    "missing_required_sheet": "error: a workbook lacking the sheet of a relation not flagged 'optional' fails that relation, and so the run",
     "every_file_in_batch_fails_to_open": "error",
     "ambiguous_sheet_pattern": "error (a pattern must select exactly one sheet per workbook)",
     "optional_relations": {
       "BNMRK_TABLE_6": "'Table 6 - ACPT' is present only in the June and October deliveries, not the March preliminary.",
       "AEXPU_TABLE_1A": "COVID-excluding variant present in the BY1/BY2 workbooks and absent from BY3.",
-      "AEXPU_TABLE_4A": "COVID-excluding variant present in the BY1/BY2 workbooks and absent from BY3."
+      "AEXPU_TABLE_4A": "COVID-excluding variant present in the BY1/BY2 workbooks and absent from BY3.",
+      "STLMT_TABLE_A6": "'Table A6 - ACPT' is present only for agreements on the accountable care prospective trend, as BNMRK 'Table 6 - ACPT' is."
     }
   },
   "relations": [
@@ -82,7 +118,20 @@
     {"relation": "QEXPU_TABLE_1", "table": "qexpu_table_1", "family": "QEXPU", "sheet_pattern": "Table\\_1-%", "kind": "sectioned_matrix", "schema": "cell_grain", "optional": false},
     {"relation": "QEXPU_TABLE_2", "table": "qexpu_table_2", "family": "QEXPU", "sheet_pattern": "Table\\_2-%", "kind": "sectioned_matrix", "schema": "cell_grain", "optional": false},
     {"relation": "QEXPU_TABLE_3", "table": "qexpu_table_3", "family": "QEXPU", "sheet_pattern": "Table\\_3-%", "kind": "sectioned_matrix", "schema": "cell_grain", "optional": false},
-    {"relation": "QEXPU_PARAMETERS", "table": "qexpu_parameters", "family": "QEXPU", "sheet_pattern": "Parameters", "kind": "key_value", "schema": "cell_grain", "optional": false, "synthetic_column_labels": ["VALUE"]}
+    {"relation": "QEXPU_PARAMETERS", "table": "qexpu_parameters", "family": "QEXPU", "sheet_pattern": "Parameters", "kind": "key_value", "schema": "cell_grain", "optional": false, "synthetic_column_labels": ["VALUE"]},
+    {"relation": "STLMT_TABLE_1", "table": "stlmt_table_1", "family": "STLMT", "sheet_pattern": "Table 1 - %", "kind": "sectioned_matrix", "schema": "stlmt_cell_grain", "optional": false},
+    {"relation": "STLMT_TABLE_1A", "table": "stlmt_table_1a", "family": "STLMT", "sheet_pattern": "Table 1A - %", "kind": "sectioned_matrix", "schema": "stlmt_cell_grain", "optional": false},
+    {"relation": "STLMT_TABLE_1B", "table": "stlmt_table_1b", "family": "STLMT", "sheet_pattern": "Table 1B - %", "kind": "sectioned_matrix", "schema": "stlmt_cell_grain", "optional": false},
+    {"relation": "STLMT_TABLE_1C", "table": "stlmt_table_1c", "family": "STLMT", "sheet_pattern": "Table 1C - %", "kind": "sectioned_matrix", "schema": "stlmt_cell_grain", "optional": false},
+    {"relation": "STLMT_TABLE_2", "table": "stlmt_table_2", "family": "STLMT", "sheet_pattern": "Table 2 - %", "kind": "sectioned_matrix", "schema": "stlmt_cell_grain", "optional": false},
+    {"relation": "STLMT_TABLE_3", "table": "stlmt_table_3", "family": "STLMT", "sheet_pattern": "Table 3 - %", "kind": "sectioned_matrix", "schema": "stlmt_cell_grain", "optional": false},
+    {"relation": "STLMT_TABLE_A1", "table": "stlmt_table_a1", "family": "STLMT", "sheet_pattern": "Table A1 - %", "kind": "sectioned_matrix", "schema": "stlmt_cell_grain", "optional": false},
+    {"relation": "STLMT_TABLE_A2", "table": "stlmt_table_a2", "family": "STLMT", "sheet_pattern": "Table A2 - %", "kind": "sectioned_matrix", "schema": "stlmt_cell_grain", "optional": false},
+    {"relation": "STLMT_TABLE_A3", "table": "stlmt_table_a3", "family": "STLMT", "sheet_pattern": "Table A3 - %", "kind": "sectioned_matrix", "schema": "stlmt_cell_grain", "optional": false},
+    {"relation": "STLMT_TABLE_A4", "table": "stlmt_table_a4", "family": "STLMT", "sheet_pattern": "Table A4 - %", "kind": "sectioned_matrix", "schema": "stlmt_cell_grain", "optional": false},
+    {"relation": "STLMT_TABLE_A5", "table": "stlmt_table_a5", "family": "STLMT", "sheet_pattern": "Table A5 - %", "kind": "sectioned_matrix", "schema": "stlmt_cell_grain", "optional": false},
+    {"relation": "STLMT_TABLE_A6", "table": "stlmt_table_a6", "family": "STLMT", "sheet_pattern": "Table A6 - %", "kind": "sectioned_matrix", "schema": "stlmt_cell_grain", "optional": true},
+    {"relation": "STLMT_PARAMETERS", "table": "stlmt_parameters", "family": "STLMT", "sheet_pattern": "Parameters", "kind": "key_value", "schema": "stlmt_cell_grain", "optional": false, "synthetic_column_labels": ["VALUE"]}
   ],
   "accepted_output_set": [
     "BNMRK_TABLE_1",
@@ -104,6 +153,19 @@
     "QEXPU_TABLE_1",
     "QEXPU_TABLE_2",
     "QEXPU_TABLE_3",
-    "QEXPU_PARAMETERS"
+    "QEXPU_PARAMETERS",
+    "STLMT_TABLE_1",
+    "STLMT_TABLE_1A",
+    "STLMT_TABLE_1B",
+    "STLMT_TABLE_1C",
+    "STLMT_TABLE_2",
+    "STLMT_TABLE_3",
+    "STLMT_TABLE_A1",
+    "STLMT_TABLE_A2",
+    "STLMT_TABLE_A3",
+    "STLMT_TABLE_A4",
+    "STLMT_TABLE_A5",
+    "STLMT_TABLE_A6",
+    "STLMT_PARAMETERS"
   ]
 }

@@ -408,7 +408,7 @@ FABRIC_CLIENT_SECRET=client-secret
 
 ## Source File Types
 
-The processing subsystem handles 10 MSSP ACO file types automatically. Files are discovered by pattern under `FILE_STORE/ACO_ID/YEAR/`.
+The processing subsystem handles 11 MSSP ACO file types automatically. Files are discovered by pattern under `FILE_STORE/ACO_ID/YEAR/`.
 
 | File type | Description | Format | Output tables |
 |---|---|---|---|
@@ -418,6 +418,7 @@ The processing subsystem handles 10 MSSP ACO file types automatically. Files are
 | BNMRK | Historical Benchmark | XLSX | `BNMRK_TABLE_1`, `BNMRK_TABLE_1A`, `BNMRK_TABLE_1B`, `BNMRK_TABLE_1C`, `BNMRK_TABLE_2`–`BNMRK_TABLE_6`, `BNMRK_PARAMETERS` |
 | AEXPU | Annual Expenditure & Utilization (one workbook per benchmark year, delivered inside the BNMRK bundle) | XLSX | `AEXPU_TABLE_1`, `AEXPU_TABLE_1A`, `AEXPU_TABLE_3`, `AEXPU_TABLE_4`, `AEXPU_TABLE_4A`, `AEXPU_PARAMETERS` |
 | QEXPU | Quarterly Expenditure & Utilization | XLSX | `QEXPU_TABLE_1`, `QEXPU_TABLE_2`, `QEXPU_TABLE_3`, `QEXPU_PARAMETERS` |
+| STLMT | Final settlement (financial reconciliation) workbook, `P.{ACO}.ACO.STLMT.Y{PY}.D…T….xlsx` in the settlement bundle | XLSX | `STLMT_TABLE_1`, `STLMT_TABLE_1A`–`STLMT_TABLE_1C`, `STLMT_TABLE_2`, `STLMT_TABLE_3`, `STLMT_TABLE_A1`–`STLMT_TABLE_A6`, `STLMT_PARAMETERS` |
 | BNEX | Beneficiary Nested Expenditure | CSV in zip | `BNEX_BENEFICIARY_NESTED_EXPENDITURE` |
 | BNEX MBI Xref | MBI cross-reference | CSV in zip | `BNEX_MBI_XREF` |
 | Shadow Bundles | Episode-level bundled payment data | CSV in zip | `SHADOW_BUNDLES` |
@@ -425,9 +426,19 @@ The processing subsystem handles 10 MSSP ACO file types automatically. Files are
 
 Every output table includes `FILE_PATH`, `FILE_NAME`, `DIRECTORY_NAME`, and `FILE_DATE` metadata columns for lineage tracking and incremental deduplication.
 
-The BNMRK / AEXPU / QEXPU workbook tables are emitted in a long/tidy shape — `ROW_NUM`, `GROUP_LABEL`, `SECTION_CODE`, `SECTION_LABEL`, `ROW_LABEL`, `COLUMN_GROUP_LABEL`, `COLUMN_LABEL`, `VALUE_TEXT` — and additionally carry `ACO_ID`, `PERFORMANCE_YEAR`, `BENCHMARK_YEAR`, `SUBMISSION_ID` and `PERIOD`. All values are VARCHAR; typing and casting happen downstream.
+The BNMRK / AEXPU / QEXPU / STLMT workbook tables are emitted in a long/tidy shape — `ROW_NUM`, `GROUP_LABEL`, `SECTION_CODE`, `SECTION_LABEL`, `ROW_LABEL`, `COLUMN_GROUP_LABEL`, `COLUMN_LABEL`, `VALUE_TEXT` — and additionally carry `ACO_ID`, `PERFORMANCE_YEAR`, `BENCHMARK_YEAR`, `SUBMISSION_ID`, `PERIOD` and `IS_EMBARGOED`. Cell values are VARCHAR; typing and casting happen downstream.
 
-Not every delivery carries every sheet, and a missing one is expected rather than an error: `BNMRK_TABLE_6` (ACPT) is absent from the March preliminary benchmark, and the COVID-excluding `AEXPU_TABLE_1A` / `AEXPU_TABLE_4A` are present for benchmark years 1 and 2 but not benchmark year 3. Those tables are legitimately empty for the deliveries and years that omit them.
+The STLMT tables carry three more grammar columns, so the settlement's real layout stays explicit (contract schema `stlmt_cell_grain`):
+
+- `BLOCK_LABEL`: the title of the block a row sits in. Only Table A2 has blocks (the CMS-HCC block, then the demographic block); NULL elsewhere.
+- `ROW_KIND`: `CODE` for a lettered row itself (Table 3 `[A] Assigned Beneficiaries`), `DETAIL` for a row under a lettered or group heading (an enrollment type, a Table A1/A2 row, a Table A4 grid row, a parameter), `TOTAL` for an unlettered row repeating its section's label (the Table 2 `[A]` total). A lettered row that only heads detail rows is not emitted; one left entirely blank still is, its cells NULL (Table 1B `[E]`, `[F]`).
+- `COLUMN_CODE`: the letter closing a header label, cut from `COLUMN_LABEL`. Table A1's letters label its columns (`Final Risk Ratio (Capped) [I]` gives `I` and `Final Risk Ratio (Capped)`).
+
+Table 2's heading rows carry sub-header text (`3-Year Average Benchmark`, `BY3`) that is not loaded. Table A4 is a lookup grid: its column A is data, loaded as a column of its own and as `ROW_LABEL`. Values stay verbatim: CMS writes a blank as an en dash (U+2013), and a large number can arrive in E-notation (`5.0E7`).
+
+`SUBMISSION_ID` identifies the delivery. For benchmark and quarterly files it is the file's `D<YYMMDD>.T<NNNNNNN>` stamp. A file inside a final settlement bundle (`P.{ACO}.ACO.STLMT.D…T…/`) gets `STLMT.` plus the bundle directory's stamp, for example `STLMT.D259999.T1111111`. A settlement can share its stamp with a benchmark delivery, and the prefix keeps the settlement's AEXPU out of that benchmark submission. `IS_EMBARGOED` is set only on settlement rows. CMS can deliver a settlement twice: `T0000000` is the embargoed copy (`TRUE`) and `T1111111` the unembargoed one (`FALSE`). Any other stamp falls back to the Embargoed/Unembargoed FinRec notice file in the bundle, and to NULL when neither settles it. Both copies load; a reader should prefer `IS_EMBARGOED = FALSE`. The STLMT workbook's tables carry the same `SUBMISSION_ID` and `IS_EMBARGOED`, with `PERIOD` set to `Y<performance year>`; its lettered rows (Table 3 runs `[A]` through `[UU]`) land in `SECTION_CODE`, and each enrollment-type row (ESRD, Disabled, Aged/dual, Aged/non-dual) in `ROW_LABEL` under its lettered block. The bundle's other files (the AASR, quality report, narrative report and notes PDFs) are not loaded.
+
+Not every delivery carries every sheet. These sheets are optional, and a missing one is expected rather than an error: `BNMRK_TABLE_6` (ACPT) is absent from the March preliminary benchmark, the COVID-excluding `AEXPU_TABLE_1A` / `AEXPU_TABLE_4A` are present for benchmark years 1 and 2 but not benchmark year 3, and `STLMT_TABLE_A6` (ACPT) is present only for agreements on the accountable care prospective trend. Those tables are legitimately empty for the deliveries and years that omit them. Every other sheet is required: a workbook without it fails that table, and so the run.
 
 ---
 
@@ -535,6 +546,26 @@ git rm -rq contracts/medicare_cclf_connector && mkdir -p contracts/medicare_cclf
 ```
 
 Then set `CONNECTOR_TAG` to the tag and `SOURCES_BLOB` to the printed blob id in `tests/e2e/cclf_sources.py`, and fix whatever `CCLF_FILE_DEFS` the tests now flag.
+
+### The vendored workbook fixtures
+
+`tests/e2e/fixtures/workbooks/*.csv` are cms_mssp_connector's
+`integration_tests/seeds/workbooks/` seeds, copied unchanged. `cclf-synth
+generate-mssp` builds them: the cell-grain rows mssp-process writes for a
+CMS-consistent synthetic PY2025 delivery for ACO `A0000`, the ACO of the
+connector's ALR seeds. The e2e run renders them back into xlsx workbooks
+(`tests/e2e/cms_workbooks.py`), and `tests/e2e/test_cms_workbooks.py` checks
+that the processors parse those workbooks into exactly the seed rows. So the
+pipeline's synthetic output and the connector's seeds stay the same data.
+The e2e ACO is the fixtures' own, `A0000`; `E2E_ACO_ID` in
+`tests/e2e/cms_workbooks.py` declares it once for the CCLF files and the
+STLMT bundle, and fails the run if the fixtures carry another. Moving to a
+different ACO means regenerating the seeds. **Copy the seeds again whenever the connector regenerates them**; never
+edit them by hand:
+
+```bash
+cp ../cms_mssp_connector/integration_tests/seeds/workbooks/*.csv tests/e2e/fixtures/workbooks/
+```
 
 ### Release digests
 
